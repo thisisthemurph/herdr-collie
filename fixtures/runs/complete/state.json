@@ -1,0 +1,196 @@
+{
+  "v": 1,
+  "run_id": "01M6X9KGPW0000000000000001",
+  "last_event_id": "01M6X9R7K00000000000000038",
+  "status": "completed",
+  "leases": [],
+  "tickets": {
+    "PAY-101": {
+      "state": "completed",
+      "resume_state": null,
+      "attention": [],
+      "round": 2,
+      "branch": "pay-101-persistence",
+      "base": "main",
+      "executions": [
+        "01M6X9KSG40000000000000007",
+        "01M6X9MJD0000000000000000R",
+        "01M6X9NNJ0000000000000001G",
+        "01M6X9P74G000000000000001W"
+      ],
+      "pr": {
+        "id": 147,
+        "url": "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/147",
+        "source": "pay-101-persistence",
+        "destination": "main",
+        "draft": false,
+        "state": "OPEN",
+        "approvals": 0,
+        "conflicted": false,
+        "conflict_checked_at": null
+      }
+    },
+    "PAY-102": {
+      "state": "completed",
+      "resume_state": null,
+      "attention": [],
+      "round": 1,
+      "branch": "pay-102-api",
+      "base": "pay-101-persistence",
+      "executions": [
+        "01M6X9PX3M000000000000002B"
+      ],
+      "pr": {
+        "id": 148,
+        "url": "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/148",
+        "source": "pay-102-api",
+        "destination": "pay-101-persistence",
+        "draft": true,
+        "state": "OPEN",
+        "approvals": 0,
+        "conflicted": false,
+        "conflict_checked_at": "2026-11-08T10:02:28.500Z"
+      }
+    }
+  },
+  "executions": {
+    "01M6X9KSG40000000000000007": {
+      "ticket": "PAY-101",
+      "profile": "developer",
+      "kind": "develop",
+      "state": "completed",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t18",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:00:15.000Z",
+      "ended_at": "2026-11-08T10:00:33.000Z",
+      "result": {
+        "summary": "Added the payments repository with migrations and tests",
+        "commits": [
+          "a1b2c3d"
+        ],
+        "tests": {
+          "command": "go test ./src/payments/...",
+          "passed": true
+        }
+      },
+      "agent_blocked": null
+    },
+    "01M6X9MJD0000000000000000R": {
+      "ticket": "PAY-101",
+      "profile": "security-reviewer",
+      "kind": "review",
+      "state": "completed",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t19",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:00:40.500Z",
+      "ended_at": "2026-11-08T10:01:09.000Z",
+      "result": {
+        "summary": "One blocking authz issue",
+        "verdict": "request_changes"
+      },
+      "agent_blocked": null
+    },
+    "01M6X9NNJ0000000000000001G": {
+      "ticket": "PAY-101",
+      "profile": "developer",
+      "kind": "remediate",
+      "state": "completed",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t20",
+      "nudges": 1,
+      "started_at": "2026-11-08T10:01:16.500Z",
+      "ended_at": "2026-11-08T10:01:27.000Z",
+      "result": {
+        "summary": "Scoped FindPayment by account id and added a test",
+        "commits": [
+          "b2c3d4e"
+        ],
+        "tests": {
+          "command": "go test ./src/payments/...",
+          "passed": true
+        }
+      },
+      "agent_blocked": null
+    },
+    "01M6X9P74G000000000000001W": {
+      "ticket": "PAY-101",
+      "profile": "security-reviewer",
+      "kind": "review",
+      "state": "completed",
+      "attempt": 1,
+      "round": 2,
+      "terminal": "t21",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:01:34.500Z",
+      "ended_at": "2026-11-08T10:01:43.500Z",
+      "result": {
+        "summary": "Finding addressed; no new issues",
+        "verdict": "approve"
+      },
+      "agent_blocked": null
+    },
+    "01M6X9PX3M000000000000002B": {
+      "ticket": "PAY-102",
+      "profile": "developer",
+      "kind": "develop",
+      "state": "completed",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t22",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:01:57.000Z",
+      "ended_at": "2026-11-08T10:02:24.000Z",
+      "result": {
+        "summary": "Added GET and POST /payments with handler tests",
+        "commits": [
+          "c3d4e5f"
+        ],
+        "tests": {
+          "command": "go test ./src/payments/...",
+          "passed": true
+        }
+      },
+      "agent_blocked": null
+    }
+  },
+  "questions": {
+    "01M6X9MV68000000000000000Y": {
+      "execution_id": "01M6X9MJD0000000000000000R",
+      "ticket": "PAY-101",
+      "question": "Should payment amounts be stored as integer minor units or as decimals?",
+      "options": [
+        "integer minor units",
+        "decimal(19,4)"
+      ],
+      "state": "delivered",
+      "answer": "Integer minor units.",
+      "share_with_ticket": true
+    }
+  },
+  "findings": [
+    {
+      "id": "01M6X9NB9W0000000000000019",
+      "ticket": "PAY-101",
+      "execution_id": "01M6X9MJD0000000000000000R",
+      "round": 1,
+      "severity": "high",
+      "blocking": true,
+      "title": "Payment id not checked against caller's account",
+      "file": "src/payments/repo.go",
+      "line": 88,
+      "addressed_in_round": null
+    }
+  ],
+  "inbox_offsets": {
+    "01M6X9KSG40000000000000007": 900,
+    "01M6X9MJD0000000000000000R": 1800,
+    "01M6X9NNJ0000000000000001G": 2100,
+    "01M6X9P74G000000000000001W": 2400,
+    "01M6X9PX3M000000000000002B": 3000
+  }
+}

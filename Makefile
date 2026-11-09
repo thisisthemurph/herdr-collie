@@ -27,6 +27,7 @@ fixtures-check:
 format:
 	$(BUN) run format
 
-# dist/collie: the CLI as one self-contained binary. The controller arrives in Phase 2.
+# dist/collie (the CLI) and dist/collie-controller, each one self-contained binary.
 build:
 	$(BUN) build --compile packages/cli/src/main.ts --outfile dist/collie
+	$(BUN) build --compile packages/controller/src/main.ts --outfile dist/collie-controller

@@ -1,6 +1,7 @@
 // collie: the command agents use to report to Collie (docs/protocol.md, "CLI design").
 // `collie ctl` arrives in Phase 2.
 import { readFileSync } from "node:fs";
+import { CTL_HELP, ctl } from "./ctl.ts";
 import { readEnv } from "./env.ts";
 import { CliError, EXIT } from "./errors.ts";
 import { COMMAND_HELP, MAIN_HELP } from "./help.ts";
@@ -17,7 +18,7 @@ export function run(
     return { code: EXIT.ok, stdout: `${MAIN_HELP}\n`, stderr: "" };
   }
   if (args.includes("--help") || args.includes("-h")) {
-    const help = COMMAND_HELP[command];
+    const help = command === "ctl" ? CTL_HELP : COMMAND_HELP[command];
     if (help) return { code: EXIT.ok, stdout: `${help}\n`, stderr: "" };
   }
   const json = args.includes("--json");
@@ -30,7 +31,7 @@ export function run(
       refuseIfEnded(ctx.inbox, ctx.executionId);
       out = REPORT_COMMANDS[command as keyof typeof REPORT_COMMANDS](ctx, args).out;
     } else if (command === "ctl") {
-      throw new CliError(EXIT.invalid, "collie ctl is not available yet (Phase 2).");
+      out = ctl(args, env);
     } else {
       throw new CliError(
         EXIT.invalid,
@@ -39,6 +40,8 @@ export function run(
     }
     return { code: EXIT.ok, stdout: `${json ? JSON.stringify(out.json) : out.text}\n`, stderr: "" };
   } catch (e) {
+    if (e instanceof CliError && json && e.json)
+      return { code: e.code, stdout: `${e.json}\n`, stderr: `collie ${command}: ${e.message}\n` };
     if (e instanceof CliError)
       return { code: e.code, stdout: "", stderr: `collie ${command}: ${e.message}\n` };
     if (e instanceof Error && "code" in e && typeof (e as { code: unknown }).code === "string") {

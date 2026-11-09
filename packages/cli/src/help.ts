@@ -16,6 +16,7 @@ export const MAIN_HELP = `collie: report to Collie from inside an agent run.
 Long text: --body-file <path> (or - for stdin) instead of --body.
 Add --json to print the recorded event as JSON.
 Run \`collie <command> --help\` for a command's options.
+collie ctl <command> '<args JSON>' steers the controller (used by the mod).
 
 Exit codes: 0 recorded · 2 fix the call (the message says how) · 3 not in a
 Collie run · 4 this execution already ended · 5 I/O error, run it again.`;

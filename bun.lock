@@ -14,6 +14,7 @@
       "name": "@collie/fixtures",
       "version": "0.0.0",
       "dependencies": {
+        "@collie/controller": "workspace:*",
         "@collie/schema": "workspace:*",
       },
     },
@@ -22,6 +23,16 @@
       "version": "0.0.0",
       "bin": {
         "collie": "bin/collie",
+      },
+      "dependencies": {
+        "@collie/schema": "workspace:*",
+      },
+    },
+    "packages/controller": {
+      "name": "@collie/controller",
+      "version": "0.0.0",
+      "bin": {
+        "collie-controller": "bin/collie-controller",
       },
       "dependencies": {
         "@collie/schema": "workspace:*",
@@ -70,6 +81,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.6", "", { "os": "win32", "cpu": "x64" }, "sha512-B7KMG26A4I9lAuxwBGMmiVcjMGAeJRoz+pzFt9brRvOAsIrgOu8ptJld5rUWui6tM1uiJwxeJhhDPuAiZtxXdw=="],
 
     "@collie/cli": ["@collie/cli@workspace:packages/cli"],
+
+    "@collie/controller": ["@collie/controller@workspace:packages/controller"],
 
     "@collie/fake-agent": ["@collie/fake-agent@workspace:tools/fake-agent"],
 
