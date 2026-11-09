@@ -3,6 +3,7 @@
 
 import {
   ATTENTION_KINDS,
+  BLOCKED_KINDS,
   count,
   EXECUTION_KINDS,
   EXECUTION_STATES,
@@ -125,6 +126,8 @@ export const executionRunState = obj({
   started_at: nullable(timestamp),
   ended_at: nullable(timestamp),
   result: nullable(executionResult),
+  // Set while hc reports the agent `blocked` (a permission or question dialog); not a state.
+  agent_blocked: opt(nullable(obj({ kind: oneOf(BLOCKED_KINDS), message: opt(nonEmpty) }))),
 });
 
 export const questionState = obj({
@@ -163,3 +166,19 @@ export const stateFile = obj({
   inbox_offsets: record(ulidKey, count),
 });
 export type StateFile = Infer<typeof stateFile>;
+
+/** `controller.lock`: the one live controller. */
+export const controllerLock = obj({
+  v: schemaVersion,
+  pid: int({ min: 1 }),
+  started_at: timestamp,
+});
+export type ControllerLock = Infer<typeof controllerLock>;
+
+/** `leases.json`: ticket key -> the run holding it. */
+export const leasesFile = obj({
+  v: schemaVersion,
+  leases: record(ticketKeyKey, ulid),
+  updated_at: timestamp,
+});
+export type LeasesFile = Infer<typeof leasesFile>;

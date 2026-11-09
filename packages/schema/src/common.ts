@@ -23,7 +23,7 @@ export const ticketKey = str({ pattern: TICKET_RE, what: "a Jira issue key such 
 const TS_MS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const TS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
 
-function validDate(re: RegExp, what: string) {
+function validDate(re: RegExp, what: string): Schema<string> {
   const base = str({ pattern: re, what });
   return {
     check(v: unknown, path: string, issues: Issue[]) {

@@ -7,13 +7,14 @@
 //   inbox/{valid,invalid}/*.jsonl     one inbox line each (an agent event)
 //   events/{valid,invalid}/*.jsonl    one controller event line each
 //   files/<kind>/{valid,invalid}/*.json   config, runtime and control files
-//   runs/complete/                    events.jsonl, run.json and executions/ for one complete run
+//   runs/complete/                    events.jsonl, run.json, state.json and executions/ for one complete run
 //   home/                             a COLLIE_HOME for `collie show` (one run, mid-remediation)
 // Every invalid/ folder has expected.json: file name -> the field path the error must name
 // ("" for whole-line problems such as a missing newline).
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { CONTROLLER_EVENT_TYPES } from "@collie/schema";
+import { rebuild } from "@collie/controller/reducer";
+import { type AnyEvent, CONTROLLER_EVENT_TYPES } from "@collie/schema";
 import { buildCompleteRun, type FixtureEvent } from "./complete-run.ts";
 import { analyst, board, developer, securityReviewer, smallBugFix, standardFeature } from "./config.ts";
 import { FixtureClock } from "./ids.ts";
@@ -232,6 +233,16 @@ const extra: Record<string, FixtureEvent> = {
     "command.rejected",
     { command: "question.answer", code: "invalid_state", reason: "Question already answered at 10:28." },
     { source: "human", caused_by: "01JC9A0C000000000000000002" },
+  ),
+  "ticket.attention_added": controllerLine(
+    "ticket.attention_added",
+    { kind: "round_cap" },
+    { ticket: "PAY-102" },
+  ),
+  "ticket.attention_removed": controllerLine(
+    "ticket.attention_removed",
+    { kind: "round_cap" },
+    { ticket: "PAY-102", source: "human", caused_by: "01JC9A0C000000000000000003" },
   ),
   "worktree.kept": controllerLine("worktree.kept", {
     worktree: "~/.herdr/worktrees/[REPO]/pay-102-api",
@@ -502,6 +513,22 @@ kind("command").invalid = {
   ],
 };
 
+kind("lock").valid = { lock: { v: 1, pid: 4242, started_at: "2026-11-08T09:59:00.123Z" } };
+kind("lock").invalid = {
+  "pid-zero": [{ v: 1, pid: 0, started_at: "2026-11-08T09:59:00Z" }, "pid"],
+  "missing-started-at": [{ v: 1, pid: 4242 }, "started_at"],
+};
+kind("leases").valid = {
+  leases: { v: 1, leases: { "PAY-101": RUN, "PAY-102": RUN }, updated_at: "2026-11-08T10:01:00Z" },
+  empty: { v: 1, leases: {}, updated_at: "2026-11-08T10:01:00Z" },
+};
+kind("leases").invalid = {
+  "run-not-ulid": [
+    { v: 1, leases: { "PAY-101": "run-3" }, updated_at: "2026-11-08T10:01:00Z" },
+    "leases.PAY-101",
+  ],
+};
+
 kind("command_reply").valid = {
   ok: { v: 1, id: CMD, ok: true, result: {} },
   "ok-with-result": { v: 1, id: CMD, ok: true, result: { run_id: RUN } },
@@ -743,6 +770,8 @@ Time limit: 60 minutes.
 // --- the complete run
 put("runs/complete/events.jsonl", complete.events.map(line).join(""));
 put("runs/complete/run.json", pretty(complete.run));
+// state.json for the finished run, as the controller's reducer builds it from the log.
+put("runs/complete/state.json", pretty(rebuild(complete.runId, complete.events as unknown as AnyEvent[])));
 for (const e of complete.executions) put(`runs/complete/executions/${e.id}/execution.json`, pretty(e));
 
 // --- write or check

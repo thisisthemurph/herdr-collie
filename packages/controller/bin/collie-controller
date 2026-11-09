@@ -1,0 +1,3 @@
+#!/bin/sh
+# Runs the controller from source (tests and development). `make build` makes dist/collie-controller.
+exec bun "$(dirname "$0")/../src/main.ts" "$@"

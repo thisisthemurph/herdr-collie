@@ -2,6 +2,7 @@
 // "Event envelope", "Agent events", "Controller events and answer delivery", "Retention").
 import {
   ARTIFACT_KINDS,
+  ATTENTION_KINDS,
   BLOCKED_KINDS,
   commitSha,
   count,
@@ -189,6 +190,10 @@ export const CONTROLLER_PAYLOADS = {
   // Ticket
   // DECISION: `from` is null for a ticket's first state in a run.
   "ticket.state_changed": obj({ from: nullable(ticketState), to: ticketState, reason: nonEmpty }),
+  // Something holding the ticket in Needs input, other than a question (question.* events
+  // cover those): round_cap, execution_failed, delivery_error.
+  "ticket.attention_added": obj({ kind: oneOf(ATTENTION_KINDS), id: opt(nonEmpty) }),
+  "ticket.attention_removed": obj({ kind: oneOf(ATTENTION_KINDS), id: opt(nonEmpty) }),
   // Execution
   "execution.created": obj({
     profile: slug,
@@ -210,8 +215,9 @@ export const CONTROLLER_PAYLOADS = {
   "execution.agent_blocked": obj({ kind: oneOf(BLOCKED_KINDS), message: opt(nonEmpty) }),
   "execution.agent_unblocked": empty,
   // Agent input: caused_by is the inbox event's id
-  "agent.event_accepted": obj({ event_type: nonEmpty }),
-  "agent.event_rejected": obj({ event_type: opt(nonEmpty), reason: nonEmpty }),
+  // `offset`: the inbox byte offset just after the line, so a rebuild knows where reading stopped.
+  "agent.event_accepted": obj({ event_type: nonEmpty, offset: opt(count) }),
+  "agent.event_rejected": obj({ event_type: opt(nonEmpty), reason: nonEmpty, offset: opt(count) }),
   // Questions
   "question.opened": obj({ question_id: ulid, question: nonEmpty, options: arr(nonEmpty) }),
   "question.answered": obj({
@@ -261,12 +267,8 @@ const TICKET_EVENTS = (t: string) =>
   t.startsWith("pr.") ||
   t.startsWith("jira.");
 /** Events whose `caused_by` must be set: they answer an inbox line or a command. */
-const CAUSED_EVENTS = new Set([
-  "agent.event_accepted",
-  "agent.event_rejected",
-  "command.applied",
-  "command.rejected",
-]);
+// DECISION: agent.event_rejected may have caused_by null, for a line with no readable id.
+const CAUSED_EVENTS = new Set(["agent.event_accepted", "command.applied", "command.rejected"]);
 
 function controllerEnvelope(type: string, payload: Schema<unknown>) {
   const base = {

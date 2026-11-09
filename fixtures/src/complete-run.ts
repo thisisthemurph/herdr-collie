@@ -79,11 +79,18 @@ export function buildCompleteRun() {
   ) => emit("execution.state_changed", { from, to, reason }, { ticket, exec, cause });
 
   /** An agent line copied from its inbox, then the controller's verdict on it. */
+  let offset = 0;
+  /** An inbox line: accepted ones are copied into the log; rejected ones only named. */
   const agent = (ticket: string, exec: string, type: string, payload: Json, reject?: string): string => {
+    offset += 300; // the inbox byte offset after this line; any increasing value will do here
+    if (reject) {
+      clock.tick();
+      const id = clock.id(); // the inbox line's id; the line itself isn't copied
+      emit("agent.event_rejected", { event_type: type, reason: reject, offset }, { ticket, exec, cause: id });
+      return id;
+    }
     const id = emit(type, payload, { ticket, exec, source: "agent" });
-    if (reject)
-      emit("agent.event_rejected", { event_type: type, reason: reject }, { ticket, exec, cause: id });
-    else emit("agent.event_accepted", { event_type: type }, { ticket, exec, cause: id });
+    emit("agent.event_accepted", { event_type: type, offset }, { ticket, exec, cause: id });
     return id;
   };
 

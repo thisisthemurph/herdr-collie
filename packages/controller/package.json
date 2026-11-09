@@ -1,0 +1,16 @@
+{
+  "name": "@collie/controller",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./reducer": "./src/reducer.ts"
+  },
+  "bin": {
+    "collie-controller": "bin/collie-controller"
+  },
+  "dependencies": {
+    "@collie/schema": "workspace:*"
+  }
+}

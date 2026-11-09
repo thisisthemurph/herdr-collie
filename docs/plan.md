@@ -107,7 +107,7 @@ Every later phase builds against fixed, tested contracts and fakes, so Phases 1 
 
 - [x] Every valid fixture passes validation, and every invalid one fails with a message naming the field.
 - [x] The fake `hc` logs its calls and plays back a scripted agent status sequence.
-- [ ] `make check` is green in CI.
+- [x] `make check` is green in CI.
 
 ## Phase 1 — `collie` CLI and inbox
 
@@ -153,11 +153,11 @@ A controller that owns runs, survives being killed, and processes inboxes, with 
 
 **Done when**
 
-- [ ] Killing the controller with `kill -9` mid-run and restarting it gives the same state as a rebuild from `events.jsonl`.
-- [ ] A second controller refuses to start while the first holds the lock.
-- [ ] Starting a run on a ticket leased by another run is refused with a clear reason.
-- [ ] `collie ctl` exits 6 within 10 seconds when no controller is running.
-- [ ] A fixture inbox produces exactly the expected accept and reject events, including a duplicate id and a write after `done`.
+- [x] Killing the controller with `kill -9` mid-run and restarting it gives the same state as a rebuild from `events.jsonl`.
+- [x] A second controller refuses to start while the first holds the lock.
+- [x] Starting a run on a ticket leased by another run is refused with a clear reason.
+- [x] `collie ctl` exits 6 within 10 seconds when no controller is running.
+- [x] A fixture inbox produces exactly the expected accept and reject events, including a duplicate id and a write after `done`.
 
 ## Phase 3 — Jira, dependency graph and board setup
 

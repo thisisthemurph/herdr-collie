@@ -56,8 +56,9 @@ Agent inboxes are append-only JSONL files, one per execution, written only by th
 
 ```
 ~/.collie/
-  controller.lock              # pid + start time; one controller
-  leases.json                  # ticket key -> run id (controller)
+  controller.lock              # {v, pid, started_at}; one controller
+  controller.log               # the controller's own log (never secrets)
+  leases.json                  # {v, leases: ticket key -> run id, updated_at} (controller)
   profiles/<profile-id>.json   # reusable agent profiles
   workflows/<workflow-id>.json # reusable workflows
   boards/<board-id>/
@@ -85,9 +86,9 @@ Agent inboxes are append-only JSONL files, one per execution, written only by th
 4. The controller keeps a byte offset per inbox in `state.json`. A final line without `\n` is incomplete: skip it and re-read on the next change.
 5. A line is capped at 64 KB. Longer bodies (a detailed finding, a test log) go to `attachments/<event-id>.md` and the event carries `body_ref`.
 6. Event ids are ULIDs. The controller de-duplicates by id, so a CLI retry after an uncertain write is safe.
-7. The controller never edits an inbox. It records acceptance or rejection of each line as its own event in `events.jsonl`, with `caused_by` set to the inbox event id.
+7. The controller never edits an inbox. It records acceptance or rejection of each line as its own event in `events.jsonl`, with `caused_by` set to the inbox event id (null for a line with no readable id) and `offset` set to the inbox byte offset just after the line. An accepted line is copied into `events.jsonl` just before its `agent.event_accepted`; a rejected line isn't copied, so it can never change state. A line's events are written in one append, so after a crash the controller resumes reading exactly after the last line it judged.
 
-**Control commands** use one file per command rather than an append log, because the mod needs a reply. `collie ctl` writes `pending/<cmd-id>.json` atomically (write temp, rename), then waits for `done/<cmd-id>.json`, which holds `ok` or an error. It times out after 10 seconds with a clear message if the controller isn't running.
+**Control commands** use one file per command rather than an append log, because the mod needs a reply. The command line is `collie ctl <command> '<args as JSON>'` (or `--args-file <path|->`), with `--json` to print the reply. A refused command exits 2 with its error code and message. `collie ctl` writes `pending/<cmd-id>.json` atomically (write temp, rename), then waits for `done/<cmd-id>.json`, which holds `ok` or an error. It times out after 10 seconds with a clear message if the controller isn't running.
 
 ## Event envelope
 
@@ -181,7 +182,8 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 | Lease | `ticket.leased`, `ticket.released` | — |
 | Ticket | `ticket.state_changed` | `from`, `to`, `reason` |
 | Execution | `execution.created`, `execution.started`, `execution.state_changed`, `execution.nudged`, `execution.completed`, `execution.failed`, `execution.killed` | `profile`, `attempt`, `terminal`, `worktree`, `from`, `to`, `nudge`, `result` |
-| Agent input | `agent.event_accepted`, `agent.event_rejected` | `event_type`; `reason` on rejection |
+| Agent input | `agent.event_accepted`, `agent.event_rejected` | `event_type`, `offset`; `reason` on rejection |
+| Attention | `ticket.attention_added`, `ticket.attention_removed` | `kind` (`round_cap`, `execution_failed`, `delivery_error`), optional `id`; questions use the question events |
 | Questions | `question.opened`, `question.answered`, `question.delivered` | `question_id`, `answer`, `by` |
 | Execution status | `execution.agent_blocked`, `execution.agent_unblocked` | `kind` (`permission` or `question`, from hc), optional `message` (hc's `status.msg`) |
 | Delivery | `pr.created`, `pr.updated`, `pr.conflict_checked`, `jira.updated`, `jira.writeback_skipped` | `number`, `url`, `base`, `head`, `transition`; `conflicted` and `paths` for a conflict check; `target` and `available` for a skipped write-back |
@@ -278,7 +280,7 @@ An execution ends only through `done`, `fail`, or the controller killing it; a p
 - **Pause and cancel.** Pause stops new dispatch and leaves running agents alone. Cancel kills agents, releases leases and ends the run.
 - **Recovery on controller start.**
   1. Acquire `controller.lock`; refuse to start if another controller holds it.
-  2. For each run not ended, rebuild state from `events.jsonl`, checking it against `state.json`.
+  2. For each run not ended, rebuild state from `events.jsonl`, checking it against `state.json`. A torn final line in `events.jsonl` (a crash mid-append) is cut off first; the controller is its only writer.
   3. Reconcile with hc: `hc ls --json --label collie.run=<run-id>` lists the run's live terminals, and `hc get <terminal> --json` gives each one's labels, matched by `collie.execution`. (`hc ls` entries carry no labels themselves; see `fixtures/hc/`.) Agents were started with `--no-parent`, so they survive the old controller.
   4. Resume reading each inbox from its saved offset.
   5. Fail as retryable any execution whose terminal is gone, then re-apply leases.
@@ -555,7 +557,7 @@ Three state machines, all owned by the controller: run, ticket and execution. Ev
 | `running` | `completed` | Every ticket is `completed` or `cancelled` |
 | `running`, `paused` | `cancelled` | `run.cancel`: all executions killed, open tickets cancelled |
 
-`completed` and `cancelled` are final; leases are released on entering either. A run with tickets stuck behind an outside blocker stays `running` until you cancel it or the blocker clears.
+`completed` and `cancelled` are final; leases are released on entering either. A run's id is the id of the `run.start` command that created it (and a board's id that of its `board.create`), so a command re-applied after a crash is a no-op. A run with tickets stuck behind an outside blocker stays `running` until you cancel it or the blocker clears.
 
 **Ticket** (within a run)
 
@@ -574,6 +576,8 @@ Three state machines, all owned by the controller: run, ticket and execution. Ev
 
 | From | To | Cause |
 | --- | --- | --- |
+| — | `pending` | `run.start`: the ticket is leased |
+| — | `completed` | `run.start` with `carry_over_from`: completed in that run |
 | `pending` | `blocked` or `ready` | Preparation set to `ready`; readiness computed |
 | `blocked` | `ready` | Every blocker satisfied: in-run blockers at `complete_at`, outside blockers by `completion_policy`, or overridden |
 | `ready` | `blocked` | A blocker regresses before dispatch (Jira reopened, override restored) |

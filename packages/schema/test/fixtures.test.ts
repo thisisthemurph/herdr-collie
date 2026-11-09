@@ -118,8 +118,9 @@ describe("complete run", () => {
     const seen = new Set<string>();
     const commands = new Set(events.filter((e) => e.type.startsWith("command.")).map((e) => e.caused_by));
     for (const e of events) {
-      if (e.caused_by)
-        expect(seen.has(e.caused_by) || commands.has(e.caused_by), `${e.type} ${e.id}`).toBe(true);
+      // A rejected inbox line isn't copied into the log, so its rejection points at the inbox.
+      const external = commands.has(e.caused_by) || e.type === "agent.event_rejected";
+      if (e.caused_by) expect(seen.has(e.caused_by) || external, `${e.type} ${e.id}`).toBe(true);
       seen.add(e.id);
     }
   });
@@ -137,6 +138,16 @@ describe("complete run", () => {
     for (const t of ["status", "artifact", "ask", "finding", "done"]) expect(types.has(t)).toBe(true);
     const completed = events.filter((e) => e.type === "ticket.state_changed" && e.payload.to === "completed");
     expect(completed.map((e) => e.ticket).sort()).toEqual(["PAY-101", "PAY-102"]);
+  });
+
+  test("state.json is valid and shows both tickets completed", () => {
+    const st = JSON.parse(read("runs/complete/state.json"));
+    expectValid("state.json", VALIDATORS.state(st));
+    expect(st.status).toBe("completed");
+    expect(Object.values(st.tickets).map((t) => (t as { state: string }).state)).toEqual([
+      "completed",
+      "completed",
+    ]);
   });
 
   test("execution files validate", () => {
