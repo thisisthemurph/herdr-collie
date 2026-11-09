@@ -1,5 +1,8 @@
 # Phase 0 hand-off: repo, contracts and fixtures
 
+> **Update (2026-11-09):** the repository is on GitHub, so CI is now
+> `.github/workflows/check.yml` (GitHub Actions), not `bitbucket-pipelines.yml`.
+
 Branch `phase-0`, based on `main` at `29c1c6c` (the spike and the accepted changes C1–C11).
 
 ## What was built
