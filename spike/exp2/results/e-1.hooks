@@ -1,0 +1,4 @@
+1794220076593 UserPromptSubmit {"prompt":"Ask me in plain text whether I prefer red or blue, then end your turn and wait for my answer. Do not use any tool."}
+1794220078066 Stop {}
+1794220079504 UserPromptSubmit {"prompt":"Blue. Now reply E-OK."}
+1794220080555 Stop {}

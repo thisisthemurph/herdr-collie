@@ -1,0 +1,5 @@
+1794220073896 SEND
+{"started":true,"status":"idle","turn":0}
+{"started":true,"status":"done","turn":1}
+{"children":[],"ended":true,"exit_code":null,"reason":"status","signal":null,"status":"done","terminal":"t12f","turn":2}
+1794220080594 WAIT-RETURNED

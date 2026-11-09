@@ -1,0 +1,3 @@
+g-1: stop->done 17ms (seen +219ms) | false-idle=1 | blocked=1 | idle#0 working#0 blocked#1 idle#1 working#1 done#2
+g-2: stop->done 20ms (seen +238ms) | false-idle=1 | blocked=1 | done#2 working#2 blocked#3 idle#3 working#3 done#4
+g-3: stop->done 23ms (seen +86ms) | false-idle=1 | blocked=1 | done#4 working#4 blocked#5 idle#5 working#5 done#6

@@ -1,0 +1,2 @@
+#!/bin/sh
+exec perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'

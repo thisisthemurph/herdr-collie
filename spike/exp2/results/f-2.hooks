@@ -1,0 +1,5 @@
+1794220653581 UserPromptSubmit {"prompt":"Use the AskUserQuestion tool to ask me whether I prefer red or blue (two options). After I answer, reply F-OK."}
+1794220654989 PreToolUse {"tool":"AskUserQuestion"}
+1794220656240 PostToolUse {"tool":"AskUserQuestion"}
+1794220657176 Stop {}
+1794220658782 SubagentStop {}

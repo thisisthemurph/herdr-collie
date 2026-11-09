@@ -1,0 +1,14 @@
+---- tool_result
+COLLIE_EXECUTION_ID=01SPIKEEXEC
+COLLIE_HOME=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/home
+COLLIE_INBOX=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/inbox/inbox.jsonl
+COLLIE_ROLE=developer
+COLLIE_RUN_ID=01SPIKERUN
+COLLIE_TICKET=SPIKE-1
+HC_SCOPE=37257367950463-6d49a53b13dd7a8742cd8e1f0c5bca8b
+HC_TERMINAL_ID=t125
+HC_TERMINAL_SOCKET=/Users/mike/.local/state/herdr-core/default/default.sock
+---- tool_result
+appended to /Users/mike/projects/herdr-collie/spike/work/spike-e3a/inbox/inbox.jsonl
+---- tool_result
+{"address":"t125","argv":["env","SPIKE_HOOK_LOG=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/hooks.log","COLLIE_HOME=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/home","COLLIE_INBOX=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/inbox/inbox.jsonl","COLLIE_RUN_ID=01SPIKERUN","COLLIE_EXECUTION_ID=01SPIKEEXEC","COLLIE_TICKET=SPIKE-1","COLLIE_ROLE=developer","/Users/mike/.local/bin/claude","Run these shell commands in order and nothing else: (1) env | grep -E \"^(COLLIE|HC_)\" | sort   (2) ./collie-fake status \"hello from agent\"   (3) hc get $HC_TERMINAL_ID --json . Then reply E3-OK followed by the value of COLLIE_INBOX as you saw it.","--settings","/Users/mike/projects/herdr-collie/spike/lib/hooks-settings.json","--permission-mode","acceptEdits","--allowedTools","Bash(env:*) Bash(./collie-fake:*) Bash(hc get:*)"],"cols":200,"created_ms":1794219671675,"cwd":"/Users/mike/projects/herdr-collie/spike/work/spike-e3a","die_with_parent":false,"exit_code":null,"finished_ms":null,"foreground":{"argv":["/Users/mike/.local/bin/claude","Run these shell commands in order and nothing else: (1) env | grep -E \"^(COLLIE|HC_)\" | sort   (2) ./collie-fake status \"hello from agent\"   (3) hc get $HC_TERMINAL_ID --json . Then reply E3-OK followed by the value of COLLIE_INBOX as you saw it.","--settings","/Users/mike/projects/herdr-collie/spike/lib/hooks-settings.json","--permission-mode","acceptEdits","--allowedTools","Bash(env:*) Bash(./collie-fake:*) Bash(hc get:*)"],"cwd":"/Users/mike/projects/herdr-collie/spike/work/spike-e3a","name":"2.1.319","pid":94943},"identity":"ghostty","keep":true,"labels":{"collie.execution":"01SPIKEEXEC","collie.run":"01SPIKERUN","collie.spike":"1","collie.ticket":"SPIKE-1","herdr.space":"sp0e6259cc7f8315660a61373f5fd8591a","herdr.tab":"spike-e3a","where":"collie-spike / 3"},"name":"spike-e3a","notify":false,"parent":null,"pid":94943,"reason":null,"reported":true,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":{"app":"claude-code","state":"working"},"status_ms":1794219691007,"template":null,"title":"Collie env and status checks","turn":1}

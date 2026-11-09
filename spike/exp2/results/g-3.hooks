@@ -1,0 +1,5 @@
+1794220715918 UserPromptSubmit {"prompt":"Run the shell command: python3 -c 'print(41+1)'   (then reply G-OK)."}
+1794220717540 PreToolUse {"tool":"Bash"}
+1794220723387 UserPromptSubmit {"prompt":"Permission denied on purpose; just reply G-OK."}
+1794220724213 Stop {}
+1794220725694 SubagentStop {}

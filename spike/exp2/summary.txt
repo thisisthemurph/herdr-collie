@@ -1,0 +1,22 @@
+a-1: stop->done 20ms (seen +72ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+a-2: stop->done 20ms (seen +210ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+a-3: stop->done 19ms (seen +230ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+b-1: stop->done 24ms (seen +51ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+b-2: stop->done 19ms (seen +96ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+b-3: stop->done 22ms (seen +244ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+c-1: stop->done 26ms (seen +171ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+c-2: stop->done 22ms (seen +63ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+c-3: stop->done 22ms (seen +131ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+d-1: stop->done 2243ms (seen +2422ms); stop->done 13ms (seen +192ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+d-2: stop->done 1434ms (seen +1589ms); stop->done 13ms (seen +168ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+d-3: stop->done 1751ms (seen +1867ms); stop->done 18ms (seen +134ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+e-1: stop->done 37ms (seen +84ms); stop->done 21ms (seen +77ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1 working#1 done#2
+e-2: stop->done 16ms (seen +220ms); stop->done 25ms (seen +239ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3 working#3 done#4
+e-3: stop->done 19ms (seen +265ms); stop->done 15ms (seen +172ms) | false-idle=0 | blocked=0 | done#4 working#4 done#5 working#5 done#6
+f-1: stop->done 20ms (seen +44ms) | false-idle=0 | blocked=1 | idle#0 working#0 blocked#1 working#1 done#2
+f-2: stop->done 17ms (seen +206ms) | false-idle=0 | blocked=1 | done#2 working#2 blocked#3 working#3 done#4
+f-3: stop->done 19ms (seen +144ms) | false-idle=0 | blocked=1 | done#4 working#4 blocked#5 working#5 done#6
+g-1: stop->done 21ms (seen +209ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+g-2: stop->done 25ms (seen +216ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+g-3: stop->done 17ms (seen +134ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+h-1: stop->done 21ms (seen +97ms); stop->done 18ms (seen +108ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1 working#1 done#2

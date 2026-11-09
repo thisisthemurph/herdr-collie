@@ -1,0 +1,11 @@
+1794219686131 UserPromptSubmit {"prompt":"Read notes.txt, then use the Edit tool to change alpha to beta in notes.txt and back to alpha again, then run ./slow.sh 2 in the foreground, then reply B-OK."}
+1794219688063 PreToolUse {"tool":"Read"}
+1794219688098 PostToolUse {"tool":"Read"}
+1794219690148 PreToolUse {"tool":"Edit"}
+1794219690200 PostToolUse {"tool":"Edit"}
+1794219692373 PreToolUse {"tool":"Edit"}
+1794219692410 PostToolUse {"tool":"Edit"}
+1794219694653 PreToolUse {"tool":"Bash"}
+1794219696741 PostToolUse {"tool":"Bash"}
+1794219698333 Stop {}
+1794219701149 SubagentStop {}

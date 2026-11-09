@@ -1,0 +1,5 @@
+1794219818320 UserPromptSubmit {"prompt":"Run ./slow.sh 100 in the FOREGROUND with a Bash timeout of 150000 ms (do not background it), then reply C-OK."}
+1794219819518 PreToolUse {"tool":"Bash"}
+1794219920516 PostToolUse {"tool":"Bash"}
+1794219921732 Stop {}
+1794219924945 SubagentStop {}

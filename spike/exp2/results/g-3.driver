@@ -1,0 +1,12 @@
+1794220715651 SEND
+{"started":true,"status":"done","turn":4}
+1794220717824 BLOCKED-SEEN
+{"error":{"hint":"typing would answer its dialog; read its screen first (hc read t12r), or --force","kind":"blocked","message":"t12r is blocked (permission)"}}
+1794220717842 send-no-force rc=9
+{"error":{"hint":"typing would answer its dialog; read its screen first (hc read t12r), or --force","kind":"blocked","message":"t12r is blocked (permission)"}}
+1794220717857 send-if-idle rc=9
+{"status":"blocked","turn":5}
+1794220718924 keys-sent
+{"started":true,"status":"idle","turn":5}
+{"children":[],"ended":true,"exit_code":null,"reason":"status","signal":null,"status":"done","terminal":"t12r","turn":6}
+1794220724251 WAIT-RETURNED

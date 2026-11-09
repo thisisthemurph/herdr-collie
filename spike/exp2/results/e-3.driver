@@ -1,0 +1,5 @@
+1794220094628 SEND
+{"started":true,"status":"done","turn":4}
+{"started":true,"status":"done","turn":5}
+{"children":[],"ended":true,"exit_code":null,"reason":"status","signal":null,"status":"done","terminal":"t12f","turn":6}
+1794220097164 WAIT-RETURNED

@@ -1,0 +1,35 @@
+{
+  "argv": [
+    "env",
+    "SPIKE_HOOK_LOG=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/hooks.log",
+    "COLLIE_HOME=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/home",
+    "COLLIE_INBOX=/Users/mike/projects/herdr-collie/spike/work/spike-e3a/inbox/inbox.jsonl",
+    "COLLIE_RUN_ID=01SPIKERUN",
+    "COLLIE_EXECUTION_ID=01SPIKEEXEC",
+    "COLLIE_TICKET=SPIKE-1",
+    "COLLIE_ROLE=developer",
+    "/Users/mike/.local/bin/claude",
+    "Run these shell commands in order and nothing else: (1) env | grep -E \"^(COLLIE|HC_)\" | sort   (2) ./collie-fake status \"hello from agent\"   (3) hc get $HC_TERMINAL_ID --json . Then reply E3-OK followed by the value of COLLIE_INBOX as you saw it.",
+    "--settings",
+    "/Users/mike/projects/herdr-collie/spike/lib/hooks-settings.json",
+    "--permission-mode",
+    "acceptEdits",
+    "--allowedTools",
+    "Bash(env:*) Bash(./collie-fake:*) Bash(hc get:*)"
+  ],
+  "labels": {
+    "collie.execution": "01SPIKEEXEC",
+    "collie.run": "01SPIKERUN",
+    "collie.spike": "1",
+    "collie.ticket": "SPIKE-1",
+    "herdr.space": "sp0e6259cc7f8315660a61373f5fd8591a",
+    "herdr.tab": "spike-e3a",
+    "where": "collie-spike / 3"
+  },
+  "status": {
+    "app": "claude-code",
+    "kind": "permission",
+    "msg": "approve Bash: hc get $HC_TERMINAL_ID --json",
+    "state": "blocked"
+  }
+}

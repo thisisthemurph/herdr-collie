@@ -1,0 +1,6 @@
+g-1: stop->done 27ms (seen +249ms) | false-idle=0 | blocked=0 | idle#0 working#0 done#1
+g-2: stop->done 20ms (seen +89ms) | false-idle=0 | blocked=0 | done#1 working#1 done#2
+g-3: stop->done 16ms (seen +138ms) | false-idle=0 | blocked=0 | done#2 working#2 done#3
+f-1: stop->done 22ms (seen +234ms) | false-idle=0 | blocked=1 | idle#0 working#0 blocked#1 working#1 done#2
+f-2: stop->done 19ms (seen +160ms) | false-idle=0 | blocked=1 | done#2 working#2 blocked#3 working#3 done#4
+f-3: stop->done 18ms (seen +236ms) | false-idle=0 | blocked=1 | done#4 working#4 blocked#5 working#5 done#6
