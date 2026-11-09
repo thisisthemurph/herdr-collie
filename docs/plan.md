@@ -78,8 +78,15 @@ Before Phase 0 builds anything, spend a day or two proving the five assumptions 
 
 **Done when**
 
-- [ ] `docs/spike.md` records a yes or no for each assumption, with evidence.
-- [ ] Every "no" has an agreed change to this plan or the protocol doc before Phase 0 starts.
+- [x] `docs/spike.md` records a yes or no for each assumption, with evidence.
+- [x] Every "no" has an agreed change to this plan or the protocol doc before Phase 0 starts.
+
+**Outcome (2026-11-09).** Every assumption held. Each came with conditions, and two needed design
+changes: agents must be launched with `--no-parent`, and PR conflict state has to be computed
+locally. A sixth check, the Jira scoped token, was added. All eleven proposed changes (C1–C11 in
+`docs/spike.md`) were accepted and are folded into this plan and `docs/protocol.md`. Before
+Phase 0: if Herdr has been updated past the snapshot in `docs/herdr/VERSION` (Herdr 0.1.14 and
+herdr-core 0.1.19 were on offer during the spike), re-sync `docs/herdr/` in its own commit first.
 
 ## Phase 0 — Repo, contracts and fixtures
 
@@ -159,7 +166,11 @@ You can build a board from real Jira tickets in Herdr and see its correct depend
 **Builds**
 
 - Jira client: auth per the decisions table, import by keys or JQL, recorded HTTP fixtures for tests.
-- Dependencies from issue links, where only blocks / is-blocked-by affect order; external-blocker detection; cycle detection.
+  - Every call goes through `https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/…` with Basic `email:token`. A scoped token is rejected on the site URL.
+  - `cloudId` comes from `https://[SITE].atlassian.net/_edge/tenant_info` at board creation and is cached as `jira.cloud_id`.
+  - Search with `POST /search/jql` and `nextPageToken` pagination (there's no `total`), asking for `summary`, `status`, `resolution` and `issuelinks`. Links carry the other issue's status, so external blockers need no extra calls.
+- Credentials: the keychain item's account field holds the Jira email. If more than one item has a Collie service name (`collie-jira`, `collie-bitbucket`), refuse to continue and name the accounts found. A 401 with `x-failure-category: FAILURE_CLIENT_AUTH` gets an error that says to check the email in the account field and the token.
+- Dependencies from issue links, where only blocks / is-blocked-by affect order; external-blocker detection; cycle detection. Direction: on issue A, a `Blocks` link with `outwardIssue: B` means A blocks B, and `inwardIssue: B` means B blocks A. Confirm this with the first recorded fixture, taken from two real test issues linked by hand.
 - Completion policy (done only, done or resolved, done or testing, custom mapping) and readiness calculation.
 - Preparation statuses, set by hand in this phase.
 - `ctl` commands: board create and import, pull in a blocker, override a dependency, exclude a ticket.
@@ -167,7 +178,7 @@ You can build a board from real Jira tickets in Herdr and see its correct depend
 - Mod: the Collie tab shell (header, view tabs) and the Board setup screen (wireframe 4).
 - Mod ↔ controller wiring: commands through `exec("collie", ["ctl", …])`, state through watching `~/.collie`; the mod starts the controller if no live lock exists.
 
-**Not in this phase:** the requirements analyst (Phase 5); starting runs from the UI (Phase 4).
+**Not in this phase:** the requirements analyst (Phase 5); starting runs from the UI (Phase 4); drag-to-pan in the graph (after the MVP; scrolling is enough, per the spike).
 
 **Done when**
 
@@ -186,7 +197,15 @@ The first end-to-end milestone: a run dispatches a real developer agent per read
 
 - Agent profiles as JSON files (the editor UI comes in Phase 7).
 - Worktree per ticket, following Herdr's `~/.herdr/worktrees/<repo>/<branch>` convention.
-- Launch through `hc run` with the environment, `collie.*` labels and `task.md`.
+- Launch through `hc run` with the environment, `collie.*` labels and `task.md`, exactly as in the protocol's *Launching an agent*:
+  - `--no-parent --no-notify`
+  - an `env` argv wrapper for the `COLLIE_*` variables
+  - the `claude-code` adapter's rules: an absolute `claude` path, `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, and the first message before the options
+- Turn-end detection and sends per the protocol's *Talking to an agent*:
+  - `idle` and `done` both mean the turn ended, observed with `hc wait <terminal>`
+  - `hc send` only then, with `HC_TERMINAL_ID` unset, never `--if idle` or `--force`
+  - exit codes 9 and 10 mean retry later
+  - `blocked` is recorded with its kind
 - A developer-only workflow: dispatch ready tickets within the ticket and agent limits.
 - Scheduler priority: critical path, then most downstream work unblocked, then longest waiting.
 - Execution lifecycle: idle-without-report nudges, timeouts, exit without a report, retries.
@@ -200,7 +219,7 @@ The first end-to-end milestone: a run dispatches a real developer agent per read
 - [ ] With fake `hc`: a three-ticket run with one dependency completes, and the blocked ticket starts only after its blocker is done.
 - [ ] With real Herdr and Claude Code: one ticket in a scratch repo reaches developer done with a commit on its branch.
 - [ ] An agent that goes idle without reporting is nudged twice, then failed as retryable.
-- [ ] Restarting the controller mid-run reattaches to the running agent without starting a duplicate.
+- [ ] Restarting the controller mid-run reattaches to the running agent without starting a duplicate. The agent's terminal survives the controller's terminal being killed.
 - [ ] Reloading the mod mid-run loses nothing.
 
 ## Phase 5 — Workflow: reviews, remediation, questions
@@ -234,16 +253,17 @@ Finished tickets become correctly based pull requests, and Jira reflects their p
 **Builds**
 
 - A `CodeHost` interface (create PR, update PR, get PR status, retarget, mark ready) with one implementation: Bitbucket Cloud's REST API at `api.bitbucket.org/2.0`, authenticated with an access token from the keychain as a Bearer token. GitHub can be added later behind the same interface.
-- Token scopes checked on start: read and write for repositories and pull requests. A missing scope fails the run before any agent starts, naming the scope.
+- Token scopes checked on start from a `GET` of the repository: read `x-credential-type` and `x-oauth-scopes`. `pullrequest:write` alone is enough, because it includes `repository:write`. A missing scope fails the run before any agent starts, naming the scope.
 - Recorded HTTP fixtures for every Bitbucket call the controller makes, so tests never hit the network.
 - Branch base rule, decided when the worktree is created: base on the default branch, unless a blocker is still unmerged, in which case base on the blocker's branch and record a Git dependency.
-- After the gate passes: verify commits, push over HTTPS with the token supplied per command (never stored in the remote URL), and open a PR with a description built from the ticket and a findings summary.
+- After the gate passes: verify commits, push over HTTPS with the token supplied per command (never stored in the remote URL), and open a PR with a description built from the ticket and a findings summary. The push is `GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!<inline helper that reads the keychain>' push <https url> <ref>`, with username `x-token-auth`. The empty first `credential.helper=` stops any configured helper from saving the token.
 - A board setting, **PR draft policy**, shown in the Board setup run settings and snapshotted with the run:
   - *Draft when stacked* (default): a PR targeting the default branch opens ready for review; a PR stacked on an unmerged parent opens as a draft.
   - *Always draft*: every PR opens as a draft, for teams where you review agent PRs before anyone else does.
-- PR tracking by polling the API: approvals, merge conflicts, merged or declined.
+- PR tracking by polling the API: approvals, merged or declined. Approvals ignore the PR author's own entry; Collie never calls `approve`.
+- Merge conflicts aren't in Bitbucket's API (the spike found no field, and `merge=true` diffstat returns 410). Each poll, fetch the destination branch and run `git merge-tree --write-tree <destination> <source>`: exit 1 means conflicted, and the result is logged as `pr.conflict_checked`. Requires git 2.38 or later, checked on start.
 - Stack upkeep: when a parent PR merges, flag children for rebase and change their destination branch. Under *Draft when stacked*, a child whose destination is now the default branch is marked ready automatically.
-- Jira write-back per the board's policy: transitions plus a comment linking the PR.
+- Jira write-back per the board's policy: transitions plus a comment linking the PR. The policy names target statuses. Each write lists the issue's transitions, picks the one whose `to.name` matches (an exact transition `name` wins over others), and logs `jira.writeback_skipped` with the available targets when none matches.
 - Ticket completion levels: implementation done, PR created, PR approved, merged; the board chooses which one counts as complete for its dependents.
 - Mod: the Pull requests panel (wireframe 1, right side) with a **Mark ready** action on draft PRs, and PR rows in the ticket inspector.
 

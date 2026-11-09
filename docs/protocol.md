@@ -45,7 +45,7 @@ Three actors act on a run: agents report through the CLI, the person steers thro
 
 - Run: acquire and release ticket leases, snapshot board, workflow and profiles, end the run.
 - Scheduling: compute readiness from the DAG, apply concurrency limits, pick the next ticket.
-- Execution: create the worktree, write `task.md`, launch the agent with `hc run` (env + labels), deliver answers and nudges with `hc send`, kill with `hc kill`.
+- Execution: create the worktree, write `task.md`, launch the agent with `hc run` (env + labels; see *Launching an agent*), deliver answers and nudges with `hc send` (see *Talking to an agent*), kill with `hc kill`.
 - Workflow: dispatch reviewers after the developer is done, aggregate findings, dispatch remediation, cap remediation rounds.
 - Delivery: verify commits, push the branch, create or update the PR, update Jira.
 - Recovery: rebuild state from the event log and reconcile with `hc ls --json` on start.
@@ -181,7 +181,8 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 | Execution | `execution.created`, `execution.started`, `execution.state_changed`, `execution.nudged`, `execution.completed`, `execution.failed`, `execution.killed` | `profile`, `attempt`, `terminal`, `worktree`, `from`, `to` |
 | Agent input | `agent.event_accepted`, `agent.event_rejected` | `reason` on rejection |
 | Questions | `question.opened`, `question.answered`, `question.delivered` | `question_id`, `answer`, `by` |
-| Delivery | `pr.created`, `pr.updated`, `jira.updated` | `number`, `url`, `base`, `head`, `transition` |
+| Execution status | `execution.agent_blocked`, `execution.agent_unblocked` | `kind` (`permission` or `question`, from hc) |
+| Delivery | `pr.created`, `pr.updated`, `pr.conflict_checked`, `jira.updated`, `jira.writeback_skipped` | `number`, `url`, `base`, `head`, `transition`; `conflicted` and `paths` for a conflict check; `target` and `available` for a skipped write-back |
 | Commands | `command.applied`, `command.rejected` | `command`, `reason` |
 
 **How an answer reaches an agent**
@@ -189,10 +190,35 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 1. The agent runs `collie ask "..."`. The CLI appends an `ask` event, whose id becomes the question id, and prints: *Question 01JC8Z7Q… recorded. End your turn now; the answer will arrive as your next message.*
 2. The controller emits `question.opened`, moves the execution and ticket to Needs input, and the mod raises a Herdr notification.
 3. The person answers in the mod, which runs `collie ctl answer <question-id> --text "..."`.
-4. The controller emits `question.answered`, then waits until the agent's terminal is idle, so it never types into a working agent.
+4. The controller emits `question.answered`, then waits until the agent's turn has ended (`idle` or `done`, see *Talking to an agent*), so it never types into a working agent.
 5. It sends the answer with `hc send`, formatted as `[collie] Answer to your question <last six characters of the id>: ... Continue the task.`, emits `question.delivered`, and moves the execution back to Working.
 
 `collie show answers` lists every answer for the execution, so an agent that loses context can recover them.
+
+**Launching an agent** (settled by the Phase 0 spike, `docs/spike.md` 3 and 3b)
+
+```
+hc run --bg --json --no-parent --no-notify --name <exec-slug> --cwd <worktree> \
+  --label collie.run=<run-id> --label collie.execution=<exec-id> --label collie.ticket=<key> \
+  [--label herdr.space=<id> --label herdr.tab=<id>] \
+  -- env COLLIE_HOME=… COLLIE_INBOX=… COLLIE_RUN_ID=… COLLIE_EXECUTION_ID=… COLLIE_TICKET=… COLLIE_ROLE=… \
+     <harness argv built by the adapter>
+```
+
+- `hc run` has no option for environment variables, so they go through an `env` argv wrapper. Use argv, not a shell string, so nothing is re-quoted.
+- `--no-parent`: the controller runs in an hc terminal itself, and a child started from it dies with it by default. Agents must outlive a controller restart.
+- `--no-notify`: otherwise hc types notes about the child into the controller's own terminal.
+- Never put a secret in this command line or its environment: the environment is readable by the same user (`ps -E`).
+- The execution moves to `working` only once `hc get` shows `turn >= 1` or `working`. An agent still at `idle`, turn 0, 60 seconds after launch means its first message never arrived: fail the execution as `tooling`, retryable.
+
+**Talking to an agent**
+
+- **Turn ended** means hc status `idle` or `done`. `done` is only "finished while nobody looked" and is treated the same as `idle`. Wait for it with `hc wait <terminal>`; don't poll the screen.
+- **Send** answers and nudges with `hc send <terminal> "<text>"` only when the status is `idle` or `done`. Run `hc send` with `HC_TERMINAL_ID` removed from its environment, or the agent receives the text wrapped in `<hc from="…">…</hc>`.
+- Never use `hc send --if idle` (it refuses `done`) or `--force` (it would answer a permission or question dialog).
+- Exit code 9 (`blocked`) or 10 (`status_mismatch`) means nothing was typed: keep the message pending and retry at the next turn end.
+- **Blocked:** when hc reports `blocked`, the controller logs `execution.agent_blocked` with its `kind` (`permission` or `question`) and the mod shows it on the execution. It clears with `execution.agent_unblocked` when the status leaves `blocked`. It is not an execution state; the person resolves it in the agent's terminal.
+- The `turn` counter from `hc get` rises once per turn. A rise after a send confirms the agent took it.
 
 ## CLI design
 
@@ -209,7 +235,7 @@ The CLI is written for agents first: plain-text output that says exactly what ha
 | `COLLIE_TICKET` | `PAY-102` | Envelope field, `show task` |
 | `COLLIE_ROLE` | `developer` / `reviewer` / `analyst` | Role checks before writing |
 
-The same ids also go on the terminal as `hc` labels (`collie.run`, `collie.execution`, `collie.ticket`), so the controller can rediscover agents after a restart.
+The same ids also go on the terminal as `hc` labels (`collie.run`, `collie.execution`, `collie.ticket`), so the controller can rediscover agents after a restart. `hc run` can't set environment variables itself; see *Launching an agent* for the `env` wrapper. Labels aren't visible as environment variables; an agent can read them with `hc get $HC_TERMINAL_ID --json`.
 
 **Long text** comes from `--body-file <path>` or `-` for stdin, never a giant flag value. Bodies over 64 KB are moved to `attachments/` automatically.
 
@@ -238,7 +264,7 @@ The controller writes a short usage block into each agent's instructions, and `c
 
 An execution ends only through `done`, `fail`, or the controller killing it; a process exiting or going idle never counts as success.
 
-- **Idle without a report.** When Herdr reports the agent idle and the inbox has no `done` or `fail`, wait 30 seconds, then nudge with `hc send`: *You haven't reported a result. Run `collie done` or `collie fail`.* After 2 nudges, fail the execution with category `tooling`, retryable.
+- **Idle without a report.** When the agent's turn has ended (`idle` or `done`) and the inbox has no `done` or `fail`, wait 30 seconds; if the turn is still ended, nudge with `hc send` (rules under *Talking to an agent*): *You haven't reported a result. Run `collie done` or `collie fail`.* After 2 nudges, fail the execution with category `tooling`, retryable.
 - **Exit without a report.** If the terminal exits first, fail with category `tooling`, retryable.
 - **Timeouts.** Each profile has a wall-clock limit. On expiry, kill the terminal and fail as retryable.
 - **Retries.** A retry is a new execution with `attempt` + 1, in the same worktree. The profile's retry policy caps attempts.
@@ -247,7 +273,7 @@ An execution ends only through `done`, `fail`, or the controller killing it; a p
 - **Recovery on controller start.**
   1. Acquire `controller.lock`; refuse to start if another controller holds it.
   2. For each run not ended, rebuild state from `events.jsonl`, checking it against `state.json`.
-  3. Reconcile with `hc ls --json`, matching terminals by the `collie.execution` label.
+  3. Reconcile with `hc ls --json`, matching terminals by the `collie.execution` label. Agents were started with `--no-parent`, so they survive the old controller.
   4. Resume reading each inbox from its saved offset.
   5. Fail as retryable any execution whose terminal is gone, then re-apply leases.
 - **Versioning.** The CLI and controller ship from one repo and share the schema. The controller rejects an unknown major `v` with `agent.event_rejected`; minor additions are just new optional fields.
@@ -279,6 +305,10 @@ Shared conventions for every file in this section and the next: a top-level `"v"
 
 - `role`: `developer`, `reviewer` or `analyst`. It decides which CLI checks apply and which workflow slots the profile can fill.
 - `harness`: names a controller-side adapter that knows how to build the command line, pass the brief, and detect idle for that tool. The MVP ships `claude-code`. `args` are appended to what the adapter builds.
+- The `claude-code` adapter (from the Phase 0 spike):
+  - it resolves `claude` to an absolute path, because `hc run` doesn't expand shell aliases
+  - it adds `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` to the `env` wrapper; background shells end the turn while work is still running, so status would read `done` early
+  - it puts the first message before any options (`claude "<first message>" --settings … <args>`), because variadic options such as `--allowedTools` swallow a trailing prompt silently
 - `instructions` are the profile's own text. The controller appends the standard Collie reporting block after them, so profiles never repeat it.
 - `max_attempts` counts the first attempt: 2 means one automatic retry.
 
@@ -310,7 +340,7 @@ Shared conventions for every file in this section and the next: a top-level `"v"
   "v": 1,
   "id": "01JC8XW0...",
   "name": "Payments API – Q4",
-  "jira": { "site": "[SITE].atlassian.net", "project": "PAY" },
+  "jira": { "site": "[SITE].atlassian.net", "cloud_id": "[CLOUD-ID]", "project": "PAY" },
   "repo": {
     "workspace": "[WORKSPACE]", "slug": "[REPO]",
     "default_branch": "main", "local_path": "~/code/[REPO]"
@@ -348,6 +378,9 @@ Shared conventions for every file in this section and the next: a top-level `"v"
 - Two different completion rules, deliberately: `completion_policy` decides whether a blocker **outside the run** is satisfied, from its Jira status; `complete_at` (`implemented`, `pr_created`, `pr_approved` or `merged`) decides when a ticket **inside the run** counts as done for its dependents.
 - `completion_policy.mode`: `done_only`, `done_or_resolved`, `done_or_testing` or `custom`, where `statuses` lists the Jira statuses that count.
 - `pr_draft_policy`: `draft_when_stacked` or `always_draft`.
+- `jira.cloud_id`: looked up once from `https://[SITE].atlassian.net/_edge/tenant_info` when the board is created. Every Jira call goes through `https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/…`, because a scoped token is rejected on the site URL.
+- `completion_policy` modes map to Jira's `statusCategory.key` (`new`, `indeterminate`, `done`) for `done_only`; `done_or_resolved` adds a non-null `resolution`; the other modes and `custom` match status names.
+- `jira_writeback` values are **target status names**. Each write lists the issue's transitions and picks the one whose `to.name` matches, preferring an exact transition `name` when there's more than one. If none matches, the controller logs `jira.writeback_skipped` with the available targets and carries on; the ticket isn't failed.
 - An entry in `overrides` makes the scheduler ignore that one blocking link.
 
 ## Runtime files
@@ -424,7 +457,7 @@ A run's files are written only by the controller. `events.jsonl` is the truth; `
       "pr": {
         "id": 147, "url": "https://bitbucket.org/...",
         "source": "pay-102-api", "destination": "pay-101-persistence",
-        "draft": true, "state": "OPEN", "approvals": 0, "conflicted": false
+        "draft": true, "state": "OPEN", "approvals": 0, "conflicted": false, "conflict_checked_at": null
       }
     }
   },
@@ -459,6 +492,8 @@ A run's files are written only by the controller. `events.jsonl` is the truth; `
 
 - **Question ids are the `ask` event's id.** The CLI knows it at write time, so `collie ask` prints it, and the UI shows its last six characters.
 - `result` holds the accepted `done` or `fail` payload.
+- `pr.conflicted` doesn't come from Bitbucket, whose API has no conflict state. The controller fetches the destination branch and runs `git merge-tree --write-tree <destination> <source>` (git 2.38 or later): exit 1 means conflicted. Each check is logged as `pr.conflict_checked`.
+- `pr.approvals` counts approvals from anyone except the PR's author. Collie's own bot can approve its own PR through the API, but Bitbucket doesn't count that approval.
 - `attention` lists everything holding the ticket in Needs input; the ticket resumes when the list is empty.
 - The controller rewrites `state.json` after each batch of events, at most every 250 ms. The mod watches it and never reads `events.jsonl` except for the Activity view.
 
@@ -624,7 +659,10 @@ updates Jira. You talk to it only through the `collie` command.
      `--retryable` if another attempt could succeed.
 5. If a `collie` command fails, read its message, fix the call and run
    it again. Never work around it.
-6. Stay inside your worktree. Never push, open pull requests, change
+6. Run long commands (builds, test suites) in the foreground and wait
+   for them. Don't background them with `&`: Collie reads a finished
+   turn as you having stopped.
+7. Stay inside your worktree. Never push, open pull requests, change
    Jira, or start other agents.
 
 Run `collie --help` for every option.
@@ -683,8 +721,8 @@ An analyst's accepted `done` sets the ticket's preparation to `ready`; its desig
 
 ## Open questions
 
-- [ ] Does `hc send` submit the message (Enter) in Claude Code, and how does it treat text arriving mid-turn? To be proven in the Phase 0 spike.
-- [ ] Is Herdr's agent status reliable enough to detect idle in Claude Code, or should the controller also poll `hc read`? To be proven in the same spike.
+- [x] Does `hc send` submit the message in Claude Code, and how does it treat text arriving mid-turn? Yes; mid-turn text is queued into the current turn. See `docs/spike.md` 1 and *Talking to an agent*.
+- [x] Is Herdr's agent status reliable enough to detect idle in Claude Code? Yes, about 20 ms after the turn ends, with background tasks disabled; no `hc read` polling. See `docs/spike.md` 2.
 - [x] Non-blocking `collie ask --assume`: deferred until after the MVP. Agents ask and wait.
 - [x] Remediation trigger: resolved under Configuration files, Workflow.
 - [x] Who starts the controller: the mod, when no live lock exists (implementation plan).
