@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "id": "standard-feature",
+  "name": "Standard feature",
+  "developer": "developer",
+  "reviewers": [
+    {
+      "profile": "security-reviewer",
+      "required": true
+    }
+  ],
+  "max_remediation_rounds": -1
+}

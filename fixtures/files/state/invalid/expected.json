@@ -1,0 +1,6 @@
+{
+  "ticket-unknown-state.json": "tickets.PAY-102.state",
+  "negative-offset.json": "inbox_offsets.01JC8Z1A000000000000000001",
+  "attention-unknown-kind.json": "tickets.PAY-102.attention[0].kind",
+  "pr-unknown-state.json": "tickets.PAY-102.pr.state"
+}

@@ -1,0 +1,3 @@
+# Collie installs from public npm, whatever the user's global npm registry is.
+[install]
+registry = "https://registry.npmjs.org/"

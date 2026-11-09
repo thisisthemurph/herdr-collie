@@ -113,15 +113,17 @@ Every event, in an inbox or in `events.jsonl`, shares one envelope. The CLI fill
 | `v` | integer | Schema major version. Additive changes don't bump it |
 | `id` | ULID string | Unique; used for de-duplication and `caused_by` links |
 | `type` | string | Event type, e.g. `finding`, `ticket.state_changed` |
-| `ts` | RFC 3339 UTC | Writer's clock, milliseconds |
+| `ts` | RFC 3339 UTC | Writer's clock, with milliseconds (`2026-11-08T10:25:13.412Z`) |
 | `source` | `agent` / `controller` / `human` | Who produced it |
-| `run_id` | ULID | Always set, even though the path implies it |
+| `run_id` | ULID or null | Always set, even though the path implies it, except for analyst executions, which belong to board preparation and have no run |
 | `execution_id` | ULID or null | Null for run- and ticket-level controller events |
 | `ticket` | string or null | Jira key; null for run-level events |
 | `caused_by` | ULID or null | The event or command that triggered this one |
 | `payload` | object | Type-specific; see the next sections |
 
 Readers ignore unknown fields and reject an unknown major `v`. Agent event types are bare words (`done`); controller event types are dotted (`execution.completed`), so the two never collide.
+
+`packages/schema` holds the exact shape of every event, file and command; `fixtures/` has a valid example of each and invalid ones that show the error messages.
 
 ## Agent events
 
@@ -178,12 +180,13 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 | Run | `run.started`, `run.paused`, `run.resumed`, `run.completed`, `run.cancelled` | `reason` |
 | Lease | `ticket.leased`, `ticket.released` | — |
 | Ticket | `ticket.state_changed` | `from`, `to`, `reason` |
-| Execution | `execution.created`, `execution.started`, `execution.state_changed`, `execution.nudged`, `execution.completed`, `execution.failed`, `execution.killed` | `profile`, `attempt`, `terminal`, `worktree`, `from`, `to` |
-| Agent input | `agent.event_accepted`, `agent.event_rejected` | `reason` on rejection |
+| Execution | `execution.created`, `execution.started`, `execution.state_changed`, `execution.nudged`, `execution.completed`, `execution.failed`, `execution.killed` | `profile`, `attempt`, `terminal`, `worktree`, `from`, `to`, `nudge`, `result` |
+| Agent input | `agent.event_accepted`, `agent.event_rejected` | `event_type`; `reason` on rejection |
 | Questions | `question.opened`, `question.answered`, `question.delivered` | `question_id`, `answer`, `by` |
-| Execution status | `execution.agent_blocked`, `execution.agent_unblocked` | `kind` (`permission` or `question`, from hc) |
+| Execution status | `execution.agent_blocked`, `execution.agent_unblocked` | `kind` (`permission` or `question`, from hc), optional `message` (hc's `status.msg`) |
 | Delivery | `pr.created`, `pr.updated`, `pr.conflict_checked`, `jira.updated`, `jira.writeback_skipped` | `number`, `url`, `base`, `head`, `transition`; `conflicted` and `paths` for a conflict check; `target` and `available` for a skipped write-back |
-| Commands | `command.applied`, `command.rejected` | `command`, `reason` |
+| Commands | `command.applied`, `command.rejected` | `command`; `code` and `reason` on rejection |
+| Retention | `worktree.kept`, `worktree.removed`, `retention.pruned` | `worktree`, `reason`, `paths` (see *Retention*) |
 
 **How an answer reaches an agent**
 
@@ -273,7 +276,7 @@ An execution ends only through `done`, `fail`, or the controller killing it; a p
 - **Recovery on controller start.**
   1. Acquire `controller.lock`; refuse to start if another controller holds it.
   2. For each run not ended, rebuild state from `events.jsonl`, checking it against `state.json`.
-  3. Reconcile with `hc ls --json`, matching terminals by the `collie.execution` label. Agents were started with `--no-parent`, so they survive the old controller.
+  3. Reconcile with hc: `hc ls --json --label collie.run=<run-id>` lists the run's live terminals, and `hc get <terminal> --json` gives each one's labels, matched by `collie.execution`. (`hc ls` entries carry no labels themselves; see `fixtures/hc/`.) Agents were started with `--no-parent`, so they survive the old controller.
   4. Resume reading each inbox from its saved offset.
   5. Fail as retryable any execution whose terminal is gone, then re-apply leases.
 - **Versioning.** The CLI and controller ship from one repo and share the schema. The controller rejects an unknown major `v` with `agent.event_rejected`; minor additions are just new optional fields.

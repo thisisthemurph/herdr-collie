@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "id": "developer",
+  "name": "Developer",
+  "role": "developer",
+  "harness": "claude-code",
+  "model": "[MODEL]",
+  "args": [
+    "--model",
+    4
+  ],
+  "instructions": "Implement the ticket. Keep changes small and tested.",
+  "permissions": {
+    "write_worktree": true,
+    "shell": true,
+    "network": false
+  },
+  "timeout_min": 60,
+  "max_attempts": 2,
+  "updated_at": "2026-11-08T09:00:00Z"
+}

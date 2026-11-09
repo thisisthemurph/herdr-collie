@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "board.update_settings",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "board_id": "01JC8XW0000000000000000001",
+    "settings": {
+      "pr_draft_policy": "never"
+    }
+  }
+}

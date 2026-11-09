@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "profile.save",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "v": 1,
+    "id": "developer",
+    "name": "Developer",
+    "role": "developer",
+    "harness": "claude-code",
+    "model": "[MODEL]",
+    "args": [
+      "--permission-mode",
+      "acceptEdits"
+    ],
+    "instructions": "Implement the ticket. Keep changes small and tested.",
+    "permissions": {
+      "write_worktree": true,
+      "shell": true,
+      "network": false
+    },
+    "timeout_min": 60,
+    "max_attempts": 2,
+    "updated_at": "2026-11-08T09:00:00Z"
+  }
+}

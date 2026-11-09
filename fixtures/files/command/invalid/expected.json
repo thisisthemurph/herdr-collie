@@ -1,0 +1,7 @@
+{
+  "unknown-command.json": "command",
+  "answer-missing-answer.json": "args.answer",
+  "import-keys-and-jql.json": "args.keys",
+  "run-start-bad-board-id.json": "args.board_id",
+  "settings-unknown-policy.json": "args.settings.pr_draft_policy"
+}

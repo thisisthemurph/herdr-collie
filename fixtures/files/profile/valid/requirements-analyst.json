@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "requirements-analyst",
+  "name": "Requirements analyst",
+  "role": "analyst",
+  "harness": "claude-code",
+  "model": "[MODEL]",
+  "args": [],
+  "instructions": "Check the ticket is ready to implement.",
+  "permissions": {
+    "write_worktree": false,
+    "shell": true,
+    "network": false
+  },
+  "timeout_min": 20,
+  "max_attempts": 1,
+  "updated_at": "2026-11-08T09:00:00Z"
+}

@@ -1,0 +1,1 @@
+{"v":1,"id":"01M6XARQM8000000000000000M","type":"command.rejected","ts":"2026-11-08T10:20:21.000Z","source":"human","run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB","execution_id":null,"ticket":null,"caused_by":"01JC9A0C000000000000000002","payload":{"command":"question.answer","code":"invalid_state","reason":"Question already answered at 10:28."}}

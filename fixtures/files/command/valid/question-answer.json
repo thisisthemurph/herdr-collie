@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "question.answer",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "run_id": "01JC8YQ0P4E2W7H5S8D3F6G9KB",
+    "question_id": "01JC8Z7Q000000000000000001",
+    "answer": "Return 404 with the standard error body.",
+    "share_with_ticket": true
+  }
+}

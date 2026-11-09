@@ -1,0 +1,9 @@
+{
+  "name": "@collie/fake-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "fake-agent": "bin/fake-agent"
+  }
+}

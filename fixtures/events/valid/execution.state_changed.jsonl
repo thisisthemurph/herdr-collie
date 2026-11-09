@@ -1,0 +1,1 @@
+{"v":1,"id":"01M6X9KWDW0000000000000009","type":"execution.state_changed","ts":"2026-11-08T10:00:13.500Z","source":"controller","run_id":"01M6X9KGPW0000000000000001","execution_id":"01M6X9KSG40000000000000007","ticket":"PAY-101","caused_by":"01M6X9KTZ00000000000000008","payload":{"from":null,"to":"created","reason":"worktree and task.md written"}}

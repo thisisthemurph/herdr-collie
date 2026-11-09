@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "01JC8XZ0000000000000000001",
+  "run_id": null,
+  "ticket": "PAY-101",
+  "profile": "requirements-analyst",
+  "role": "analyst",
+  "kind": "analyse",
+  "round": 0,
+  "attempt": 1,
+  "worktree": "~/.herdr/worktrees/[REPO]/pay-101-persistence",
+  "branch": "pay-101-persistence",
+  "terminal": "t18",
+  "created_at": "2026-11-08T10:00:10.500Z"
+}

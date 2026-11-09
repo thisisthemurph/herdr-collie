@@ -1,0 +1,72 @@
+{
+  "v": 1,
+  "id": "01JC8XW0000000000000000001",
+  "name": "Payments API – Q4",
+  "jira": {
+    "site": "jira.example.com",
+    "cloud_id": "[CLOUD-ID]",
+    "project": "PAY"
+  },
+  "repo": {
+    "workspace": "[WORKSPACE]",
+    "slug": "[REPO]",
+    "default_branch": "main",
+    "local_path": "~/code/[REPO]"
+  },
+  "settings": {
+    "workflow": "standard-feature",
+    "max_tickets": 3,
+    "max_agents": 6,
+    "completion_policy": {
+      "mode": "done_or_resolved",
+      "statuses": []
+    },
+    "complete_at": "pr_created",
+    "pr_draft_policy": "draft_when_stacked",
+    "jira_writeback": {
+      "on_start": "In Progress",
+      "on_pr": "In Review",
+      "comment": true
+    }
+  },
+  "tickets": {
+    "PAY-101": {
+      "summary": "Payment persistence layer",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-102": {
+      "summary": "Payment API endpoints",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-101",
+        "OPS-77"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": "small-bug-fix",
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "OPS-77": {
+      "summary": "Provision payments database",
+      "jira_status": "Done",
+      "status_category": "done",
+      "resolution": "Done",
+      "blocked_by": [],
+      "on_board": false,
+      "preparation": "unreviewed",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    }
+  },
+  "overrides": [],
+  "updated_at": "2026-11-08T09:52:00Z"
+}

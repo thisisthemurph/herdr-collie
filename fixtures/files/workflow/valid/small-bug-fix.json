@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "id": "small-bug-fix",
+  "name": "Small bug fix",
+  "developer": "developer",
+  "reviewers": [],
+  "max_remediation_rounds": 0
+}

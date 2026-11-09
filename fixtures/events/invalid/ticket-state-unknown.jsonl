@@ -1,0 +1,1 @@
+{"v":1,"id":"01M6X9KPJC0000000000000005","type":"ticket.state_changed","ts":"2026-11-08T10:00:07.500Z","source":"controller","run_id":"01M6X9KGPW0000000000000001","execution_id":null,"ticket":"PAY-101","caused_by":null,"payload":{"from":null,"to":"done","reason":"preparation ready; no blockers"}}

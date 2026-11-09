@@ -1,0 +1,7 @@
+{
+  "unknown-role.json": "role",
+  "id-not-slug.json": "id",
+  "timeout-zero.json": "timeout_min",
+  "permissions-missing-shell.json": "permissions.shell",
+  "args-not-strings.json": "args[1]"
+}

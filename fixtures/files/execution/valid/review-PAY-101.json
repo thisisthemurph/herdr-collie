@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "01M6X9MJD0000000000000000R",
+  "run_id": "01M6X9KGPW0000000000000001",
+  "ticket": "PAY-101",
+  "profile": "security-reviewer",
+  "role": "reviewer",
+  "kind": "review",
+  "round": 1,
+  "attempt": 1,
+  "worktree": "~/.herdr/worktrees/[REPO]/pay-101-persistence",
+  "branch": "pay-101-persistence",
+  "terminal": "t19",
+  "created_at": "2026-11-08T10:00:36.000Z"
+}

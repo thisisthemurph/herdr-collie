@@ -1,0 +1,92 @@
+{
+  "v": 1,
+  "run_id": "01JC8YQ0P4E2W7H5S8D3F6G9KB",
+  "last_event_id": "01JC8Z9K000000000000000001",
+  "status": "running",
+  "leases": [
+    "PAY-102",
+    "PAY-103"
+  ],
+  "tickets": {
+    "PAY-102": {
+      "state": "needs_input",
+      "resume_state": "reviewing",
+      "attention": [
+        {
+          "kind": "question",
+          "id": "01JC8Z7Q000000000000000001"
+        }
+      ],
+      "round": 1,
+      "branch": "pay-102-api",
+      "base": "pay-101-persistence",
+      "executions": [
+        "01JC8Z1A000000000000000001"
+      ],
+      "pr": {
+        "id": 147,
+        "url": "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/147",
+        "source": "pay-102-api",
+        "destination": "pay-101-persistence",
+        "draft": true,
+        "state": "OPEN",
+        "approvals": 0,
+        "conflicted": false,
+        "conflict_checked_at": null
+      }
+    },
+    "PAY-103": {
+      "state": "blocked",
+      "resume_state": null,
+      "attention": [],
+      "round": 0,
+      "branch": null,
+      "base": null,
+      "executions": [],
+      "pr": null
+    }
+  },
+  "executions": {
+    "01JC8Z1A000000000000000001": {
+      "ticket": "PAY-102",
+      "profile": "security-reviewer",
+      "kind": "review",
+      "state": "needs_input",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t18",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:19:04Z",
+      "ended_at": null,
+      "result": null
+    }
+  },
+  "questions": {
+    "01JC8Z7Q000000000000000001": {
+      "execution_id": "01JC8Z1A000000000000000001",
+      "ticket": "PAY-102",
+      "question": "Should GET /payments/{id} return 404 or 403 for another account's payment?",
+      "options": [],
+      "state": "open",
+      "answer": null,
+      "share_with_ticket": false
+    }
+  },
+  "findings": [
+    {
+      "id": "01JC8Z6F000000000000000001",
+      "ticket": "PAY-102",
+      "execution_id": "01JC8Z1A000000000000000001",
+      "round": 1,
+      "severity": "high",
+      "blocking": true,
+      "title": "Payment id not checked against caller's account",
+      "file": "src/payments/api.go",
+      "line": 88,
+      "addressed_in_round": null
+    }
+  ],
+  "inbox_offsets": {
+    "01JC8Z1A000000000000000001": 1834
+  }
+}

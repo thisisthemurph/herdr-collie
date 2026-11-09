@@ -1,0 +1,13 @@
+{
+  "unknown-type.jsonl": "type",
+  "run-id-null.jsonl": "run_id",
+  "source-agent.jsonl": "source",
+  "ticket-state-unknown.jsonl": "payload.to",
+  "ticket-state-missing-ticket.jsonl": "ticket",
+  "accepted-without-caused-by.jsonl": "caused_by",
+  "pr-number-zero.jsonl": "payload.number",
+  "execution-created-missing-worktree.jsonl": "payload.worktree",
+  "execution-created-attempt-zero.jsonl": "payload.attempt",
+  "question-answered-missing-answer.jsonl": "payload.answer",
+  "blocked-unknown-kind.jsonl": "payload.kind"
+}

@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "id": "standard-feature",
+  "name": "Standard feature",
+  "developer": "developer",
+  "reviewers": [
+    {
+      "required": true
+    }
+  ],
+  "max_remediation_rounds": 2
+}

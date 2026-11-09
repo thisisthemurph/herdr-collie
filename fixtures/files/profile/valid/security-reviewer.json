@@ -1,0 +1,21 @@
+{
+  "v": 1,
+  "id": "security-reviewer",
+  "name": "Security reviewer",
+  "role": "reviewer",
+  "harness": "claude-code",
+  "model": "[MODEL]",
+  "args": [
+    "--permission-mode",
+    "plan"
+  ],
+  "instructions": "Review the diff for authz, injection, secrets and unsafe input handling.",
+  "permissions": {
+    "write_worktree": false,
+    "shell": true,
+    "network": false
+  },
+  "timeout_min": 30,
+  "max_attempts": 2,
+  "updated_at": "2026-11-08T09:00:00Z"
+}

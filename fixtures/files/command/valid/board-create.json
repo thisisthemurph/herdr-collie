@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "board.create",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "name": "Payments API – Q4",
+    "jira": {
+      "site": "[SITE].atlassian.net",
+      "project": "PAY"
+    },
+    "repo": {
+      "workspace": "[WORKSPACE]",
+      "slug": "[REPO]",
+      "default_branch": "main",
+      "local_path": "~/code/[REPO]"
+    },
+    "settings": {
+      "complete_at": "pr_created",
+      "max_tickets": 3
+    }
+  }
+}

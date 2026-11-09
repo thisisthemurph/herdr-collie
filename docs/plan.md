@@ -105,8 +105,8 @@ Every later phase builds against fixed, tested contracts and fakes, so Phases 1 
 
 **Done when**
 
-- [ ] Every valid fixture passes validation, and every invalid one fails with a message naming the field.
-- [ ] The fake `hc` logs its calls and plays back a scripted agent status sequence.
+- [x] Every valid fixture passes validation, and every invalid one fails with a message naming the field.
+- [x] The fake `hc` logs its calls and plays back a scripted agent status sequence.
 - [ ] `make check` is green in CI.
 
 ## Phase 1 — `collie` CLI and inbox

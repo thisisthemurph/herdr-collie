@@ -1,0 +1,3 @@
+#!/bin/sh
+# fake-hc: put this folder first on PATH in tests. See tools/fake-hc/README.md.
+exec bun "$(dirname "$0")/../src/main.ts" "$@"

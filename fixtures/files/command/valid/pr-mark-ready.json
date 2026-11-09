@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "pr.mark_ready",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "run_id": "01JC8YQ0P4E2W7H5S8D3F6G9KB",
+    "ticket": "PAY-102"
+  }
+}

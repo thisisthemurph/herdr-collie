@@ -1,0 +1,9 @@
+{
+  "send-blocked.stderr.json": 9,
+  "send-status-mismatch.stderr.json": 10,
+  "send-finished.stderr.json": 11,
+  "not-found.stderr.json": 3,
+  "run-name-taken.stderr.json": 1,
+  "rm-live.stderr.json": 1,
+  "run-spawn-failed.stderr.json": 1
+}

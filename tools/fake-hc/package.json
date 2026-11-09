@@ -1,0 +1,9 @@
+{
+  "name": "@collie/fake-hc",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "hc": "bin/hc"
+  }
+}

@@ -1,1 +1,4 @@
 spike/work/
+node_modules/
+dist/
+.fake-hc/

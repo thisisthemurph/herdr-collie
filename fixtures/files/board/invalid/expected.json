@@ -1,0 +1,8 @@
+{
+  "unknown-complete-at.json": "settings.complete_at",
+  "custom-without-statuses.json": "settings.completion_policy.statuses",
+  "ticket-key-lowercase.json": "tickets.pay-1",
+  "ticket-unknown-preparation.json": "tickets.PAY-101.preparation",
+  "override-by-agent.json": "overrides[0].by",
+  "site-not-atlassian.json": "jira.site"
+}
