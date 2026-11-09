@@ -95,6 +95,7 @@ export function buildCompleteRun() {
     kind: ExecutionFile["kind"],
     round: number,
     branch: string,
+    base = "main",
   ): string => {
     clock.tick();
     const exec = clock.id();
@@ -113,12 +114,13 @@ export function buildCompleteRun() {
       attempt: 1,
       worktree,
       branch,
+      base,
       terminal: t,
       created_at: clock.now(),
     });
     const created = emit(
       "execution.created",
-      { profile, role, kind, round, attempt: 1, worktree, branch },
+      { profile, role, kind, round, attempt: 1, worktree, branch, base },
       { ticket, exec },
     );
     execState(ticket, exec, null, "created", "worktree and task.md written", created);
@@ -249,7 +251,15 @@ export function buildCompleteRun() {
 
   // --- PAY-102: unblocked by PAY-101's PR; OPS-77 is outside the run and already Done
   ticketState("PAY-102", "blocked", "ready", "PAY-101 at pr_created; OPS-77 done_or_resolved", pr1);
-  const dev2 = launch("PAY-102", "developer", "developer", "develop", 1, "pay-102-api");
+  const dev2 = launch(
+    "PAY-102",
+    "developer",
+    "developer",
+    "develop",
+    1,
+    "pay-102-api",
+    "pay-101-persistence",
+  );
   ticketState("PAY-102", "ready", "in_progress", "developer dispatched");
   emit("jira.updated", { transition: "In Progress" }, { ticket: "PAY-102" });
   const pause = command("run.pause");

@@ -1,0 +1,51 @@
+{
+  "v": 1,
+  "steps": [
+    { "collie": ["status", "Reviewing the diff against main", "--phase", "reviewing"] },
+    {
+      "collie": [
+        "finding",
+        "--severity",
+        "high",
+        "--category",
+        "security",
+        "--title",
+        "Payment id not checked against caller's account",
+        "--file",
+        "src/payments/api.go",
+        "--line",
+        "88",
+        "--body",
+        "GET /payments/{id} returns any payment by id.",
+        "--suggestion",
+        "Scope the lookup by account id."
+      ]
+    },
+    {
+      "collie": [
+        "finding",
+        "--severity",
+        "low",
+        "--category",
+        "style",
+        "--title",
+        "Unclear variable name",
+        "--file",
+        "src/payments/api.go",
+        "--line",
+        "12",
+        "--body-file",
+        "-"
+      ],
+      "stdin": "`p` could be `payment`."
+    },
+    { "collie": ["done", "--summary", "Looks fine"], "expect_exit": 2, "expect_output": "--verdict" },
+    {
+      "collie": ["done", "--summary", "Looks fine", "--verdict", "approve"],
+      "expect_exit": 2,
+      "expect_output": "must be request_changes"
+    },
+    { "collie": ["done", "--summary", "One blocking authz issue", "--verdict", "request_changes"] },
+    { "collie": ["fail", "--reason", "too late", "--category", "other"], "expect_exit": 4 }
+  ]
+}

@@ -27,6 +27,6 @@ fixtures-check:
 format:
 	$(BUN) run format
 
-# The collie binary arrives in Phase 1 and the controller in Phase 2.
+# dist/collie: the CLI as one self-contained binary. The controller arrives in Phase 2.
 build:
-	@echo "make build: nothing to build yet (collie CLI: Phase 1, controller: Phase 2)"
+	$(BUN) build --compile packages/cli/src/main.ts --outfile dist/collie

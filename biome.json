@@ -16,7 +16,8 @@
       "!fixtures/events",
       "!fixtures/files",
       "!fixtures/runs",
-      "!fixtures/hc"
+      "!fixtures/hc",
+      "!fixtures/home"
     ]
   },
   "formatter": {

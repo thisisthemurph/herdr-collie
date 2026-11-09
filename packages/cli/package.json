@@ -1,0 +1,12 @@
+{
+  "name": "@collie/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "collie": "bin/collie"
+  },
+  "dependencies": {
+    "@collie/schema": "workspace:*"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "v": 1,
+  "steps": [
+    { "collie": ["show", "task"], "expect_output": "PAY-102" },
+    { "collie": ["status", "Reading the payments handler", "--phase", "investigating"] },
+    { "shell": "printf 'package payments\\n' > handler.go" },
+    {
+      "collie": ["done", "--summary", "Added the handler"],
+      "expect_exit": 2,
+      "expect_output": "uncommitted changes"
+    },
+    { "shell": "git add -A && git commit -q -m 'PAY-102: add payments handler'" },
+    {
+      "shell": "\"$COLLIE_BIN\" artifact --kind commit --ref \"$(git rev-parse HEAD)\" --description 'Payments handler'"
+    },
+    {
+      "collie": ["artifact", "--kind", "pr", "--ref", "x"],
+      "expect_exit": 2,
+      "expect_output": "--kind must be one of"
+    },
+    {
+      "collie": [
+        "ask",
+        "Should GET /payments/{id} return 404 or 403 for another account's payment?",
+        "--option",
+        "404",
+        "--option",
+        "403"
+      ],
+      "expect_output": "End your turn now"
+    },
+    { "collie": ["status", "Running the tests", "--phase", "testing"] },
+    {
+      "collie": [
+        "done",
+        "--summary",
+        "Added GET and POST /payments with handler tests",
+        "--tests-command",
+        "go test ./...",
+        "--tests-passed"
+      ]
+    },
+    { "collie": ["status", "One more thing"], "expect_exit": 4, "expect_output": "already ended" }
+  ]
+}
