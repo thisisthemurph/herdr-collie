@@ -8,6 +8,7 @@
 //   events/{valid,invalid}/*.jsonl    one controller event line each
 //   files/<kind>/{valid,invalid}/*.json   config, runtime and control files
 //   runs/complete/                    events.jsonl, run.json and executions/ for one complete run
+//   home/                             a COLLIE_HOME for `collie show` (one run, mid-remediation)
 // Every invalid/ folder has expected.json: file name -> the field path the error must name
 // ("" for whole-line problems such as a missing newline).
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,7 +19,7 @@ import { analyst, board, developer, securityReviewer, smallBugFix, standardFeatu
 import { FixtureClock } from "./ids.ts";
 
 const ROOT = join(import.meta.dir, "..");
-const GENERATED_DIRS = ["inbox", "events", "files", "runs"];
+const GENERATED_DIRS = ["inbox", "events", "files", "runs", "home"];
 
 type Json = Record<string, unknown>;
 const out = new Map<string, string>();
@@ -523,6 +524,220 @@ for (const [k, { valid, invalid }] of Object.entries(files)) {
     `files/${k}/invalid/expected.json`,
     pretty(Object.fromEntries(Object.entries(invalid).map(([n, [, field]]) => [`${n}.json`, field]))),
   );
+}
+
+// --- home/: a COLLIE_HOME mid-run, for `collie show task|findings|answers`
+// PAY-102 is in remediation. Its open findings: one blocking (body inline), one not blocking
+// (body in an attachment); one finding from round 0 is already addressed. Questions: one
+// answered for this execution, one shared from the reviewer, one unshared, one still open.
+{
+  const HR = "01JC8YQ0P4E2W7H5S8D3F6G9KB";
+  const DEV = "01JC8ZA0000000000000000001"; // the remediation execution running `collie show`
+  const REV = "01JC8Z90000000000000000001"; // the reviewer that raised the findings
+  const OLD = "01JC8Z80000000000000000001"; // an earlier developer execution
+  const F1 = "01JC8Z910000000000004F2A1C";
+  const F2 = "01JC8Z920000000000007KQ9D3";
+  const F0 = "01JC8Z81000000000000B6M2X8";
+  const Q1 = "01JC8ZA10000000000003QWE7P";
+  const Q2 = "01JC8Z930000000000009XRT5V";
+  const Q3 = "01JC8Z940000000000001ZZB4N";
+  const Q4 = "01JC8ZA20000000000005HJK8M";
+  const runPath = `home/runs/${HR}`;
+  const ev = (id: string, exec: string, payload: Json, ts: string) => ({
+    v: 1,
+    id,
+    type: "finding",
+    ts,
+    source: "agent",
+    run_id: HR,
+    execution_id: exec,
+    ticket: "PAY-102",
+    caused_by: null,
+    payload,
+  });
+  const f1 = ev(
+    F1,
+    REV,
+    {
+      severity: "high",
+      category: "security",
+      title: "Payment id not checked against caller's account",
+      file: "src/payments/api.go",
+      line: 88,
+      body: "GET /payments/{id} returns any payment by id.\nAnother account's payment is readable.",
+      suggestion: "Scope the lookup by account id from the auth context.",
+      blocking: true,
+    },
+    "2026-11-08T10:30:01.000Z",
+  );
+  const f2 = ev(
+    F2,
+    REV,
+    {
+      severity: "medium",
+      category: "tests",
+      title: "Handler tests miss the error paths",
+      body_ref: `attachments/${F2}.md`,
+      blocking: false,
+    },
+    "2026-11-08T10:30:02.000Z",
+  );
+  const f0 = ev(
+    F0,
+    OLD,
+    { severity: "low", title: "Typo in a log message", body: "recieved", blocking: false },
+    "2026-11-08T10:10:00.000Z",
+  );
+  put(`${runPath}/events.jsonl`, [f0, f1, f2].map(line).join(""));
+  put(
+    `${runPath}/executions/${REV}/attachments/${F2}.md`,
+    "Missing tests:\n- 404 for an unknown id\n- 400 for a bad amount\n",
+  );
+  const finding = (
+    id: string,
+    exec: string,
+    round: number,
+    severity: string,
+    blocking: boolean,
+    title: string,
+    extra: Json,
+    addressed: number | null,
+  ) => ({
+    id,
+    ticket: "PAY-102",
+    execution_id: exec,
+    round,
+    severity,
+    blocking,
+    title,
+    ...extra,
+    addressed_in_round: addressed,
+  });
+  const q = (exec: string, question: string, state: string, answer: string | null, share: boolean) => ({
+    execution_id: exec,
+    ticket: "PAY-102",
+    question,
+    options: [],
+    state,
+    answer,
+    share_with_ticket: share,
+  });
+  const homeState = {
+    v: 1,
+    run_id: HR,
+    last_event_id: Q4,
+    status: "running",
+    leases: ["PAY-102"],
+    tickets: {
+      "PAY-102": {
+        state: "remediating",
+        resume_state: null,
+        attention: [],
+        round: 1,
+        branch: "pay-102-api",
+        base: "main",
+        executions: [OLD, REV, DEV],
+        pr: null,
+      },
+    },
+    executions: {
+      [DEV]: {
+        ticket: "PAY-102",
+        profile: "developer",
+        kind: "remediate",
+        state: "working",
+        attempt: 1,
+        round: 1,
+        terminal: "t21",
+        nudges: 0,
+        started_at: "2026-11-08T10:31:00Z",
+        ended_at: null,
+        result: null,
+      },
+    },
+    questions: {
+      [Q1]: q(
+        DEV,
+        "Should the 404 body include the payment id?",
+        "delivered",
+        "No: never echo ids back.",
+        false,
+      ),
+      [Q2]: q(
+        REV,
+        "Is cross-account access ever allowed for admins?",
+        "delivered",
+        "No, not even for admins.",
+        true,
+      ),
+      [Q3]: q(REV, "Which reviewer owns the tests?", "delivered", "Not shared with the ticket.", false),
+      [Q4]: q(DEV, "Is pagination in scope?", "open", null, false),
+    },
+    findings: [
+      finding(F0, OLD, 0, "low", false, "Typo in a log message", {}, 1),
+      finding(F2, REV, 1, "medium", false, "Handler tests miss the error paths", {}, null),
+      finding(
+        F1,
+        REV,
+        1,
+        "high",
+        true,
+        "Payment id not checked against caller's account",
+        { file: "src/payments/api.go", line: 88 },
+        null,
+      ),
+    ],
+    inbox_offsets: {},
+  };
+  put(`${runPath}/state.json`, pretty(homeState));
+  put(
+    `${runPath}/executions/${DEV}/execution.json`,
+    pretty({
+      v: 1,
+      id: DEV,
+      run_id: HR,
+      ticket: "PAY-102",
+      profile: "developer",
+      role: "developer",
+      kind: "remediate",
+      round: 1,
+      attempt: 1,
+      worktree: "~/.herdr/worktrees/[REPO]/pay-102-api",
+      branch: "pay-102-api",
+      base: "main",
+      terminal: "t21",
+      created_at: "2026-11-08T10:31:00Z",
+    }),
+  );
+  put(
+    `${runPath}/executions/${DEV}/task.md`,
+    `# PAY-102 · Payment API endpoints
+
+You are the Developer on PAY-102.
+Kind: remediate · round 1 · attempt 1
+
+## Ticket
+Add GET and POST /payments.
+
+### Acceptance criteria
+- GET /payments/{id} returns the caller's payment, or 404.
+
+## Context
+- Repository: [WORKSPACE]/[REPO]
+- Working directory: ~/.herdr/worktrees/[REPO]/pay-102-api
+- Branch: pay-102-api, based on main
+
+## Your task
+Address the findings below. Fix every blocking finding. Fix non-blocking ones where it's cheap; otherwise say why in your done summary. Commit as before.
+
+## Findings to address
+Run \`collie show findings\`.
+
+## Limits
+Time limit: 60 minutes.
+`,
+  );
+  put(`${runPath}/executions/${DEV}/inbox.jsonl`, "");
 }
 
 // --- the complete run

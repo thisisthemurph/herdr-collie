@@ -17,6 +17,16 @@
         "@collie/schema": "workspace:*",
       },
     },
+    "packages/cli": {
+      "name": "@collie/cli",
+      "version": "0.0.0",
+      "bin": {
+        "collie": "bin/collie",
+      },
+      "dependencies": {
+        "@collie/schema": "workspace:*",
+      },
+    },
     "packages/schema": {
       "name": "@collie/schema",
       "version": "0.0.0",
@@ -58,6 +68,8 @@
     "@biomejs/cli-win32-arm64": ["@biomejs/cli-win32-arm64@2.6.6", "", { "os": "win32", "cpu": "arm64" }, "sha512-DjVXwQAQeHrO1JEZAEus54k40Tnh4glyU3VFLcDBKwoz0xnxCEnqw6TCMXoujcQMQynWd3AY8bLrbR1o0XNqow=="],
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.6", "", { "os": "win32", "cpu": "x64" }, "sha512-B7KMG26A4I9lAuxwBGMmiVcjMGAeJRoz+pzFt9brRvOAsIrgOu8ptJld5rUWui6tM1uiJwxeJhhDPuAiZtxXdw=="],
+
+    "@collie/cli": ["@collie/cli@workspace:packages/cli"],
 
     "@collie/fake-agent": ["@collie/fake-agent@workspace:tools/fake-agent"],
 

@@ -10,6 +10,7 @@
   "attempt": 0,
   "worktree": "~/.herdr/worktrees/[REPO]/pay-101-persistence",
   "branch": "pay-101-persistence",
+  "base": "main",
   "terminal": "t18",
   "created_at": "2026-11-08T10:00:10.500Z"
 }

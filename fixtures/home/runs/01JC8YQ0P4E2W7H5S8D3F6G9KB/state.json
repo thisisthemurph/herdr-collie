@@ -1,0 +1,113 @@
+{
+  "v": 1,
+  "run_id": "01JC8YQ0P4E2W7H5S8D3F6G9KB",
+  "last_event_id": "01JC8ZA20000000000005HJK8M",
+  "status": "running",
+  "leases": [
+    "PAY-102"
+  ],
+  "tickets": {
+    "PAY-102": {
+      "state": "remediating",
+      "resume_state": null,
+      "attention": [],
+      "round": 1,
+      "branch": "pay-102-api",
+      "base": "main",
+      "executions": [
+        "01JC8Z80000000000000000001",
+        "01JC8Z90000000000000000001",
+        "01JC8ZA0000000000000000001"
+      ],
+      "pr": null
+    }
+  },
+  "executions": {
+    "01JC8ZA0000000000000000001": {
+      "ticket": "PAY-102",
+      "profile": "developer",
+      "kind": "remediate",
+      "state": "working",
+      "attempt": 1,
+      "round": 1,
+      "terminal": "t21",
+      "nudges": 0,
+      "started_at": "2026-11-08T10:31:00Z",
+      "ended_at": null,
+      "result": null
+    }
+  },
+  "questions": {
+    "01JC8ZA10000000000003QWE7P": {
+      "execution_id": "01JC8ZA0000000000000000001",
+      "ticket": "PAY-102",
+      "question": "Should the 404 body include the payment id?",
+      "options": [],
+      "state": "delivered",
+      "answer": "No: never echo ids back.",
+      "share_with_ticket": false
+    },
+    "01JC8Z930000000000009XRT5V": {
+      "execution_id": "01JC8Z90000000000000000001",
+      "ticket": "PAY-102",
+      "question": "Is cross-account access ever allowed for admins?",
+      "options": [],
+      "state": "delivered",
+      "answer": "No, not even for admins.",
+      "share_with_ticket": true
+    },
+    "01JC8Z940000000000001ZZB4N": {
+      "execution_id": "01JC8Z90000000000000000001",
+      "ticket": "PAY-102",
+      "question": "Which reviewer owns the tests?",
+      "options": [],
+      "state": "delivered",
+      "answer": "Not shared with the ticket.",
+      "share_with_ticket": false
+    },
+    "01JC8ZA20000000000005HJK8M": {
+      "execution_id": "01JC8ZA0000000000000000001",
+      "ticket": "PAY-102",
+      "question": "Is pagination in scope?",
+      "options": [],
+      "state": "open",
+      "answer": null,
+      "share_with_ticket": false
+    }
+  },
+  "findings": [
+    {
+      "id": "01JC8Z81000000000000B6M2X8",
+      "ticket": "PAY-102",
+      "execution_id": "01JC8Z80000000000000000001",
+      "round": 0,
+      "severity": "low",
+      "blocking": false,
+      "title": "Typo in a log message",
+      "addressed_in_round": 1
+    },
+    {
+      "id": "01JC8Z920000000000007KQ9D3",
+      "ticket": "PAY-102",
+      "execution_id": "01JC8Z90000000000000000001",
+      "round": 1,
+      "severity": "medium",
+      "blocking": false,
+      "title": "Handler tests miss the error paths",
+      "addressed_in_round": null
+    },
+    {
+      "id": "01JC8Z910000000000004F2A1C",
+      "ticket": "PAY-102",
+      "execution_id": "01JC8Z90000000000000000001",
+      "round": 1,
+      "severity": "high",
+      "blocking": true,
+      "title": "Payment id not checked against caller's account",
+      "file": "src/payments/api.go",
+      "line": 88,
+      "addressed_in_round": null
+    }
+  ],
+  "inbox_offsets": {}
+}

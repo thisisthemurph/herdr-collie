@@ -127,11 +127,11 @@ Agents can report everything the protocol defines, and bad calls fail with a mes
 
 **Done when**
 
-- [ ] 20 parallel `collie finding` calls produce exactly 20 intact lines.
-- [ ] Each invalid fixture's equivalent call exits 2 with a fix-it message.
-- [ ] `done` in a dirty worktree exits 2; any write after `done` or `fail` exits 4; a missing environment exits 3.
-- [ ] The `show` commands print from fixture files.
-- [ ] A fake-agent scenario writes an inbox identical to its expected fixture, apart from ids and timestamps.
+- [x] 20 parallel `collie finding` calls produce exactly 20 intact lines.
+- [x] Each invalid fixture's equivalent call exits 2 with a fix-it message.
+- [x] `done` in a dirty worktree exits 2; any write after `done` or `fail` exits 4; a missing environment exits 3.
+- [x] The `show` commands print from fixture files.
+- [x] A fake-agent scenario writes an inbox identical to its expected fixture, apart from ids and timestamps.
 
 ## Phase 2 — Controller core
 

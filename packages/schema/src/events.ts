@@ -198,6 +198,7 @@ export const CONTROLLER_PAYLOADS = {
     attempt: int({ min: 1 }),
     worktree: nonEmpty,
     branch: nonEmpty,
+    base: opt(nonEmpty),
   }),
   "execution.started": obj({ terminal: nonEmpty }),
   "execution.state_changed": obj({ from: nullable(executionState), to: executionState, reason: nonEmpty }),

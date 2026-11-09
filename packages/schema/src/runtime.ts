@@ -75,6 +75,8 @@ export const executionFile = obj({
   attempt: int({ min: 1 }),
   worktree: nonEmpty,
   branch: nonEmpty,
+  // The branch this one is based on, for the CLI's "commits ahead of base" check (Phase 1).
+  base: opt(nonEmpty),
   terminal: nullable(nonEmpty),
   created_at: timestamp,
 });

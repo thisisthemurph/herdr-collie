@@ -244,9 +244,12 @@ The same ids also go on the terminal as `hc` labels (`collie.run`, `collie.execu
 
 **Checks before writing** (cheap, local, and they save a round trip)
 
-- `done` as developer: refuses if `git status` shows uncommitted changes or there are no commits ahead of the base branch.
-- `done` as reviewer: refuses without `--verdict`, or `request_changes` with no blocking findings recorded.
-- Any write: refuses if the execution already has a `done` or `fail`.
+- `done` as developer: refuses if `git status` shows uncommitted or untracked files, or there are no commits ahead of the base branch (`base` in `execution.json`). Without `--commit`, it records every commit ahead of base.
+- `done` as reviewer: refuses without `--verdict`, `request_changes` with no blocking findings recorded, or `approve` with blocking findings recorded. Only reviewers give a verdict.
+- `finding` is for reviewers and analysts; `artifact` is for developers.
+- `finding` always writes `blocking`: `--blocking` or `--not-blocking` when given, otherwise true for `critical` and `high`.
+- Any write: refuses if the execution already has a `done` or `fail`. The CLI checks this under the inbox lock.
+- A final inbox line without `\n` can only be left by a writer that died mid-write. The next write closes it off with a newline first, so the torn line is rejected on its own instead of corrupting the new one.
 
 **Exit codes**
 
@@ -256,7 +259,7 @@ The same ids also go on the terminal as `hc` labels (`collie.run`, `collie.execu
 | 2 | Invalid arguments; the message says what to change |
 | 3 | Not inside a Collie execution (environment missing) |
 | 4 | Execution already ended |
-| 5 | I/O error; safe to retry, the event id is reused |
+| 5 | I/O error; safe to retry. The CLI has already retried the write with the same event id, checking first whether the line landed. |
 | 6 | `ctl` only: controller not running or command timed out |
 
 Output is human-readable by default. `--json` prints the written event or command result, for the mod.
@@ -431,12 +434,14 @@ A run's files are written only by the controller. `events.jsonl` is the truth; `
   "attempt": 1,
   "worktree": "~/.herdr/worktrees/[REPO]/pay-102-api",
   "branch": "pay-102-api",
+  "base": "pay-101-persistence",
   "terminal": "t18",
   "created_at": "2026-11-08T10:19:00Z"
 }
 ```
 
 - `kind`: `analyse`, `develop`, `review` or `remediate`. Remediation is a developer execution with the open findings in its brief.
+- `base`: the branch `branch` is based on. The CLI reads it for a developer's "commits ahead of base" check; without it, that check is left to the controller.
 - Analyst executions belong to board preparation and have `run_id: null`; they live under `boards/<board-id>/prep/<exec-id>/` with the same files.
 
 **Materialised state** — `runs/<run-id>/state.json`

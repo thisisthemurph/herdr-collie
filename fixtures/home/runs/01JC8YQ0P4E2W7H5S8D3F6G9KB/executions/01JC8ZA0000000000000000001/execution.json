@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "id": "01JC8ZA0000000000000000001",
+  "run_id": "01JC8YQ0P4E2W7H5S8D3F6G9KB",
+  "ticket": "PAY-102",
+  "profile": "developer",
+  "role": "developer",
+  "kind": "remediate",
+  "round": 1,
+  "attempt": 1,
+  "worktree": "~/.herdr/worktrees/[REPO]/pay-102-api",
+  "branch": "pay-102-api",
+  "base": "main",
+  "terminal": "t21",
+  "created_at": "2026-11-08T10:31:00Z"
+}
