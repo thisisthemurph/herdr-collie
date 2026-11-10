@@ -9,6 +9,7 @@ import { newUlid } from "@collie/schema";
 import { defaultAdapters } from "./adapters/index.ts";
 import { Controller } from "./controller.ts";
 import { keychainJira } from "./credentials.ts";
+import { seedDefaults } from "./defaults.ts";
 import { Hc, spawnHc } from "./hc.ts";
 import { defaultHome, Home } from "./home.ts";
 import { fetchHttp, JiraClient } from "./jira.ts";
@@ -47,6 +48,8 @@ export function start(root: string): { controller: Controller; stop: () => void 
     : { hc: new Hc(spawnHc(process.env.COLLIE_HC ?? "hc")), adapters: defaultAdapters(), briefs: jira };
   const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira, agents);
   controller.recover();
+  const seeded = seedDefaults(home);
+  if (seeded.length) log(`saved the default ${seeded.join(", ")}`);
   log(`controller started (home ${root})`);
   controller.reconcile().catch((e) => log(`reconcile failed: ${(e as Error).stack ?? e}`));
   let stopped = false;
@@ -70,14 +73,18 @@ export function start(root: string): { controller: Controller; stop: () => void 
 
 if (import.meta.main) {
   const root = parseHome(process.argv.slice(2));
+  // Handlers go in before start(): the lock is written inside it, and a signal that arrives
+  // before they exist would kill the process with the lock still on disk. Node-style handlers
+  // run only once start() returns, so `stop` is always set by then.
+  let stop: (() => void) | null = null;
+  for (const sig of ["SIGTERM", "SIGINT"] as const) {
+    process.on(sig, () => {
+      stop?.();
+      process.exit(0);
+    });
+  }
   try {
-    const { stop } = start(root);
-    for (const sig of ["SIGTERM", "SIGINT"] as const) {
-      process.on(sig, () => {
-        stop();
-        process.exit(0);
-      });
-    }
+    stop = start(root).stop;
   } catch (e) {
     if (e instanceof LockHeldError) {
       console.error(`collie-controller: ${e.message}`);

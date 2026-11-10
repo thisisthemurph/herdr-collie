@@ -392,6 +392,19 @@ describe("watching an agent", () => {
     }
     expect(readEvents(h.s.home, runId).some((e) => e.type === "execution.failed")).toBe(false);
     expect(execState(runId, "PAY-101")).toEqual(["starting"]);
+
+    // The person answers the dialog (the screen clears); Claude takes a moment to start. The time
+    // spent waiting for the person doesn't count against the 60 s start timeout.
+    h.scenario([
+      { ...dialog, screen: "", steps: [...(dialog.steps ?? []), { on: "get", state: "working", turn: 1 }] },
+    ]);
+    await h.settle(
+      () => execState(runId, "PAY-101")[0] === "working",
+      "the agent to start after the dialog",
+      1_000,
+    );
+    expect(readEvents(h.s.home, runId).some((e) => e.type === "execution.failed")).toBe(false);
+    expect(execState(runId, "PAY-101")).toEqual(["working"]);
   });
 
   test("a done the worktree contradicts is rejected, and the agent is told why at its next idle", async () => {

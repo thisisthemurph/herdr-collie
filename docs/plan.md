@@ -241,10 +241,10 @@ A ticket goes through the full default workflow on its own, and stops only to as
 
 **Done when**
 
-- [ ] A reviewer's blocking finding triggers one remediation round, after which the reviewer approves and the ticket passes the gate.
-- [ ] Hitting the round cap moves the ticket to Needs input instead of looping.
-- [ ] An answered question reaches the waiting agent, which continues the task.
-- [ ] The analyst marks an under-specified ticket Needs input with its questions.
+- [x] A reviewer's blocking finding triggers one remediation round, after which the reviewer approves and the ticket passes the gate.
+- [x] Hitting the round cap moves the ticket to Needs input instead of looping.
+- [x] An answered question reaches the waiting agent, which continues the task.
+- [x] The analyst marks an under-specified ticket Needs input with its questions.
 
 ## Phase 6 — Delivery: PRs and Jira
 

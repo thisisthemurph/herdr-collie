@@ -6,10 +6,14 @@
 
 import type { Board, StateFile } from "@collie/schema";
 import { readdir } from "fs/promises";
-import { exec, hc, home, readTextFile } from "herdr";
+import { exec, hc, home, props, readTextFile } from "herdr";
 import type { RunView } from "./model.ts";
 
-export const collieHome = () => `${home()}/.collie`;
+// DECISION: a tab opened with the prop `collie_home` reads that folder instead of ~/.collie, so the
+// UI can be tried against a hand-made home (`tab.new --mod collie --props '{"collie_home":"…"}'`).
+// Commands still go to the controller `collie ctl` finds, so only reading is redirected.
+export const collieHome = () =>
+  (props() as { collie_home?: string } | undefined)?.collie_home ?? `${home()}/.collie`;
 
 export type CtlReply = {
   ok: boolean;
@@ -54,9 +58,13 @@ export async function loadRun(boardId: string): Promise<RunView | null> {
   const heads = (
     await Promise.all(
       ids.map(async (id) => {
-        const r = await readJson<{ id: string; board_id: string; number: number; status: RunView["status"] }>(
-          `${collieHome()}/runs/${id}/run.json`,
-        );
+        const r = await readJson<{
+          id: string;
+          board_id: string;
+          number: number;
+          status: RunView["status"];
+          snapshot?: { profiles?: Record<string, { name?: string }> };
+        }>(`${collieHome()}/runs/${id}/run.json`);
         return r?.board_id === boardId ? r : null;
       }),
     )
@@ -66,7 +74,36 @@ export async function loadRun(boardId: string): Promise<RunView | null> {
   if (!pick) return null;
   const state = await readJson<StateFile>(`${collieHome()}/runs/${pick.id}/state.json`);
   if (!state) return null;
-  return { id: pick.id, number: pick.number, status: state.status, boardId, state };
+  const profiles = Object.fromEntries(
+    Object.entries(pick.snapshot?.profiles ?? {}).flatMap(([id, p]) => (p?.name ? [[id, p.name]] : [])),
+  );
+  return { id: pick.id, number: pick.number, status: state.status, boardId, state, profiles };
+}
+
+/**
+ * The requirements analyst's executions, questions and findings for a board (Phase 5): the same
+ * file as a run's state.json, at boards/<id>/prep/. It exists only after a first investigation.
+ */
+export async function loadPrep(boardId: string): Promise<StateFile | null> {
+  return readJson<StateFile>(`${collieHome()}/boards/${boardId}/prep/state.json`);
+}
+
+/** The workflows a board or ticket can use, from ~/.collie/workflows/*.json, by id. */
+export async function loadWorkflows(): Promise<{ id: string; name: string }[]> {
+  let files: string[] = [];
+  try {
+    files = await readdir(`${collieHome()}/workflows`);
+  } catch {
+    return [];
+  }
+  const all = await Promise.all(
+    files
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => readJson<{ id?: string; name?: string }>(`${collieHome()}/workflows/${f}`)),
+  );
+  return all
+    .flatMap((w) => (w?.id ? [{ id: w.id, name: w.name ?? w.id }] : []))
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Whether a live controller holds controller.lock. */

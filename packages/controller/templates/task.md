@@ -24,7 +24,7 @@ Kind: {{kind}} · round {{round}} · attempt {{attempt}}
 ## Context
 - Repository: {{repository}}
 - Working directory: {{worktree}}
-- Branch: {{branch}}, based on {{base}}
+- Branch: {{branch_line}}
 {{#stacked}}
 - {{stacked}}
 {{/stacked}}
@@ -39,7 +39,7 @@ Kind: {{kind}} · round {{round}} · attempt {{attempt}}
 {{kind_instructions}}
 {{#findings}}
 
-## Findings to address
+## {{findings_heading}}
 {{findings}}
 {{/findings}}
 

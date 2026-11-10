@@ -499,6 +499,11 @@ kind("command").valid = {
   "dep-override": cmd("dep.override", { board_id: board.id, blocker: "OPS-77", blocked: "PAY-102" }),
   "profile-save": cmd("profile.save", developer),
   "pr-mark-ready": cmd("pr.mark_ready", { run_id: RUN, ticket: "PAY-102" }),
+  "ticket-set-workflow": cmd("ticket.set_workflow", {
+    board_id: board.id,
+    ticket: "PAY-102",
+    workflow: "small-bug-fix",
+  }),
 };
 kind("command").invalid = {
   "unknown-command": [cmd("question.reply", {}), "command"],

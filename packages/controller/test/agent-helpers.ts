@@ -31,6 +31,7 @@ import {
 export const FAKE_HC = join(import.meta.dir, "../../../tools/fake-hc/bin/hc");
 export const FAKE_AGENT = join(import.meta.dir, "../../../tools/fake-agent/src/main.ts");
 export const CLI_BIN = join(import.meta.dir, "../../cli/bin/collie");
+let commits = 0;
 export const BOARD = "01JC8XW0000000000000000001";
 
 export type Agent = {
@@ -70,6 +71,14 @@ export type Harness = {
   state: (runId: string) => StateFile;
   /** Plays a developer finishing: commits in the ticket's worktree and reports `done`. */
   finish: (runId: string, ticket: string) => string;
+  /** Appends an agent event to an execution's inbox, as the collie CLI would. */
+  report: (runId: string, execId: string, type: string, payload: Record<string, unknown>) => void;
+  /** The ticket's executions of one kind, oldest first. */
+  execs: (
+    runId: string,
+    ticket: string,
+    kind?: string,
+  ) => { id: string; round: number; attempt: number; state: string }[];
   cleanup: () => Promise<void>;
 };
 
@@ -195,11 +204,21 @@ export function harness(
       return rl;
     },
     state: (runId) => h.c.runs.get(runId)?.state ?? JSON.parse(readFileSync(s.home.state(runId), "utf8")),
+    report: (runId, execId, type, payload) => {
+      const ticket = h.state(runId).executions[execId]?.ticket as string;
+      appendFileSync(s.home.inbox(runId, execId), agentLine(runId, execId, ticket, type, payload));
+    },
+    execs: (runId, ticket, kind) => {
+      const st = h.state(runId);
+      return (st.tickets[ticket]?.executions ?? [])
+        .map((id) => ({ id, ...(st.executions[id] as NonNullable<(typeof st.executions)[string]>) }))
+        .filter((e) => !kind || e.kind === kind);
+    },
     finish: (runId, ticket) => {
       const st = h.state(runId);
       const execId = st.tickets[ticket]?.executions.at(-1) as string;
       const exec = JSON.parse(readFileSync(s.home.executionFile(runId, execId), "utf8"));
-      writeFileSync(join(exec.worktree, `${ticket}.txt`), `work on ${ticket}\n`);
+      writeFileSync(join(exec.worktree, `${ticket}.txt`), `work on ${ticket} #${++commits}\n`);
       git(exec.worktree, "add", "-A");
       git(exec.worktree, "commit", "-q", "-m", `${ticket}: work`);
       const sha = git(exec.worktree, "rev-parse", "HEAD");

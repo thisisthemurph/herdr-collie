@@ -8,9 +8,11 @@ import {
   type CommandReply,
   type ErrorCode,
   formatIssues,
+  type Profile,
   type RunFile,
   validateBoard,
   validateCommand,
+  validateProfile,
 } from "@collie/schema";
 import { type AgentOptions, Agents } from "./agents.ts";
 import { handleCommand } from "./commands.ts";
@@ -42,6 +44,8 @@ type Outcome = { ok: true; result: Ok } | { ok: false; code: ErrorCode; message:
 export class Controller {
   /** Runs that haven't ended: their inboxes are watched. */
   readonly runs = new Map<string, RunLog>();
+  /** Boards' preparation logs (the requirements analyst), by board id. They aren't runs. */
+  readonly preps = new Map<string, RunLog>();
   /** The command being handled, so a run it ends can log it before ending. */
   private currentCommand: { id: string; command: string } | null = null;
 
@@ -58,9 +62,23 @@ export class Controller {
     this.agents = agentOptions ? new Agents(this, agentOptions) : null;
   }
 
+  /** Every log with executions to watch: the live runs, then the boards' preparation logs. */
+  allLogs(): RunLog[] {
+    return [...this.runs.values(), ...this.preps.values()];
+  }
+
+  isLive(rl: RunLog): boolean {
+    return rl.prep ? this.preps.get(rl.id) === rl : this.runs.get(rl.id) === rl;
+  }
+
+  /** A run, or a board's preparation log, by the id a command names it with. */
+  logFor(id: string): RunLog | undefined {
+    return this.runs.get(id) ?? this.preps.get(id);
+  }
+
   /** Runs the inbox watcher over one execution now (and returns how many lines it judged). */
   sweepInbox(rl: RunLog, execId: string): number {
-    return processInbox(rl, execId, this.home, this.clock, this.agents?.hooks);
+    return processInbox(rl, execId, this.clock, this.agents?.hooks);
   }
 
   /** After recover(): reattach to what hc is running, and finish what a crash left half done. */
@@ -90,6 +108,38 @@ export class Controller {
       this.log(`recovered run ${id} (${rl.state.status}, ${rl.ids.size} events)`);
     }
     this.saveLeases();
+    this.recoverPreps();
+  }
+
+  /** Boards that have analyst executions get their preparation log back. */
+  private recoverPreps(): void {
+    for (const id of readdirSync(this.home.boards).sort()) {
+      if (!existsSync(this.home.prepEvents(id))) continue;
+      try {
+        this.prepLog(id);
+        this.log(`recovered the preparation log of board ${id}`);
+      } catch (e) {
+        this.log(`board ${id}: couldn't recover its preparation log: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  /** A board's preparation log, loaded or started. */
+  prepLog(boardId: string): RunLog {
+    const have = this.preps.get(boardId);
+    if (have) return have;
+    const board = this.loadBoard(boardId);
+    const profiles: Record<string, Profile> = {};
+    for (const id of existsSync(join(this.home.root, "profiles"))
+      ? readdirSync(join(this.home.root, "profiles"))
+      : []) {
+      if (!id.endsWith(".json")) continue;
+      const r = validateProfile(readJson(join(this.home.root, "profiles", id)));
+      if (r.ok && r.value.role === "analyst") profiles[r.value.id] = r.value;
+    }
+    const rl = RunLog.prep(this.home, board, profiles, this.log);
+    this.preps.set(boardId, rl);
+    return rl;
   }
 
   // --- the loop
@@ -103,7 +153,7 @@ export class Controller {
     if (!this.commandsBusy) {
       this.processCommands().catch((e) => this.log(`command loop failed: ${(e as Error).stack ?? e}`));
     }
-    for (const rl of [...this.runs.values()]) {
+    for (const rl of [...this.runs.values(), ...this.preps.values()]) {
       for (const execId of Object.keys(rl.state.executions)) this.sweepInbox(rl, execId);
       this.agents?.tick(rl);
       rl.maybeFlush(this.clock.now());
@@ -111,7 +161,7 @@ export class Controller {
   }
 
   flushAll(): void {
-    for (const rl of this.runs.values()) rl.flush(this.clock.now());
+    for (const rl of this.allLogs()) rl.flush(this.clock.now());
   }
 
   // --- control commands
@@ -188,7 +238,7 @@ export class Controller {
     this.currentCommand = null;
     // A run command is logged in the run it acts on (run.start logs its own command.applied).
     const runId = (cmd.args as { run_id?: string }).run_id;
-    const rl = runId ? this.runs.get(runId) : undefined;
+    const rl = runId ? this.logFor(runId) : undefined;
     if (rl && !rl.commandIds.has(cmd.id)) {
       const o = { cause: cmd.id, source: "human" as const };
       this.emit(rl, [
@@ -341,6 +391,11 @@ export class Controller {
 
   saveBoard(board: Board): void {
     writeJsonAtomic(this.home.board(board.id), { ...board, updated_at: isoSeconds(this.clock.now()) });
+  }
+
+  /** requireRun, but a board id names its preparation log (for answers and cancels, which work there too). */
+  requireLog(id: string): RunLog {
+    return this.preps.get(id) ?? this.requireRun(id);
   }
 
   requireRun(runId: string): RunLog {

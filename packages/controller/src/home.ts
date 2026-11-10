@@ -77,6 +77,20 @@ export class Home {
     return join(this.execDir(runId, execId), "inbox.jsonl");
   }
 
+  /** Board preparation (the requirements analyst): `boards/<id>/prep/`, laid out like a run. */
+  prepDir(boardId: string) {
+    return join(this.boards, boardId, "prep");
+  }
+  prepEvents(boardId: string) {
+    return join(this.prepDir(boardId), "events.jsonl");
+  }
+  prepState(boardId: string) {
+    return join(this.prepDir(boardId), "state.json");
+  }
+  prepExecDir(boardId: string, execId: string) {
+    return join(this.prepDir(boardId), execId);
+  }
+
   ensureLayout() {
     for (const d of [
       this.pending,

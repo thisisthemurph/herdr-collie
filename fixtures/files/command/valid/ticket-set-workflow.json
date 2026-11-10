@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "id": "01JC9A0C000000000000000001",
+  "command": "ticket.set_workflow",
+  "at": "2026-11-08T10:29:00Z",
+  "args": {
+    "board_id": "01JC8XW0000000000000000001",
+    "ticket": "PAY-102",
+    "workflow": "small-bug-fix"
+  }
+}

@@ -5,7 +5,6 @@
 import { closeSync, existsSync, fstatSync, openSync, readSync } from "node:fs";
 import { type AgentEvent, type AnyEvent, formatIssues, parseInboxLine } from "@collie/schema";
 import { type Clock, makeEvent } from "./events.ts";
-import type { Home } from "./home.ts";
 import { isExecutionFinal } from "./machines.ts";
 import type { RunLog } from "./runlog.ts";
 
@@ -35,15 +34,9 @@ export type InboxHooks = {
 };
 
 /** Processes the new complete lines of one execution's inbox. Returns how many it judged. */
-export function processInbox(
-  rl: RunLog,
-  execId: string,
-  home: Home,
-  clock: Clock,
-  hooks: InboxHooks = {},
-): number {
+export function processInbox(rl: RunLog, execId: string, clock: Clock, hooks: InboxHooks = {}): number {
   const start = rl.state.inbox_offsets[execId] ?? 0;
-  const buf = readFrom(home.inbox(rl.id, execId), start);
+  const buf = readFrom(rl.inboxFile(execId), start);
   if (!buf) return 0;
   let pos = 0;
   let judged = 0;
@@ -90,7 +83,9 @@ export function judge(
   if (rl.ids.has(a.id))
     return reject(`duplicate of event ${a.id}, which was already processed`, a.id, a.type);
   if (!exec) return reject(`execution ${execId} is not part of run ${rl.id}`, a.id, a.type);
-  if (a.execution_id !== execId || a.run_id !== rl.id || a.ticket !== exec.ticket) {
+  // An analyst belongs to board preparation, not to a run: its events carry no run id.
+  const runOk = rl.prep ? a.run_id === null : a.run_id === rl.id;
+  if (a.execution_id !== execId || !runOk || a.ticket !== exec.ticket) {
     return reject(
       `the event is for execution ${a.execution_id} of run ${a.run_id} on ${a.ticket}, but it is in the inbox of execution ${execId} of run ${rl.id} on ${exec.ticket}`,
       a.id,
