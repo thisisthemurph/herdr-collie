@@ -298,6 +298,8 @@ export class Delivery {
       const dest = await this.o.remote.fetchBranch(this.repoPath(board), board.repo, pr.destination);
       const r = await mergeConflicts(this.repoPath(board), dest, pr.source);
       const now = rl.state.tickets[key]?.pr;
+      // The destination may have been retargeted while git ran; that result is about the old one.
+      if (!now || now.destination !== pr.destination) return;
       if (now && (now.conflicted !== r.conflicted || now.conflict_checked_at === null)) {
         this.c.emit(rl, [
           this.c.event(
@@ -308,7 +310,8 @@ export class Delivery {
           ),
         ]);
       }
-      if (now?.needs_rebase && (await isAncestor(this.repoPath(board), dest, pr.source))) {
+      if (now.needs_rebase && (await isAncestor(this.repoPath(board), dest, pr.source))) {
+        if (rl.state.tickets[key]?.pr?.destination !== pr.destination) return;
         this.c.emit(rl, [
           this.c.event(rl.id, "pr.updated", { number: pr.id, needs_rebase: false }, { ticket: key }),
         ]);
