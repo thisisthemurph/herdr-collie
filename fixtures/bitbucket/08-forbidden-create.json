@@ -1,0 +1,40 @@
+{
+  "step": "08-forbidden-create",
+  "description": "a token that may not open PRs",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D/pullrequests",
+        "body": {
+          "title": "x",
+          "description": "x",
+          "source": {
+            "branch": {
+              "name": "a"
+            }
+          },
+          "destination": {
+            "branch": {
+              "name": "main"
+            }
+          },
+          "draft": false,
+          "close_source_branch": false
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "type": "error",
+          "error": {
+            "message": "Your credentials lack one or more required privilege scopes."
+          }
+        }
+      }
+    }
+  ]
+}

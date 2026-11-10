@@ -7,6 +7,7 @@ import {
   count,
   EXECUTION_KINDS,
   EXECUTION_STATES,
+  JIRA_STEPS,
   nonEmpty,
   PR_STATES,
   QUESTION_STATES,
@@ -93,6 +94,9 @@ export const prState = obj({
   approvals: count,
   conflicted: bool,
   conflict_checked_at: nullable(timestamp),
+  // Phase 6: set when the parent PR it was stacked on merged; cleared when the branch has the
+  // destination branch's head in its history again (rebased or merged by hand).
+  needs_rebase: opt(bool),
 });
 
 export const ticketRunState = obj({
@@ -104,6 +108,8 @@ export const ticketRunState = obj({
   base: nullable(nonEmpty),
   executions: arr(ulid),
   pr: nullable(prState),
+  // Phase 6: which Jira write-backs have been made for this ticket, so a restart doesn't repeat them.
+  jira_steps: opt(arr(oneOf(JIRA_STEPS))),
 });
 
 /** An accepted `done` or `fail` payload. */

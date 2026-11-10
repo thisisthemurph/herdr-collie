@@ -6,12 +6,14 @@ import {
   BLOCKED_KINDS,
   commitSha,
   count,
+  DELIVERY_STEPS,
   EVENT_SOURCES,
   EXECUTION_KINDS,
   EXECUTION_STATES,
   eventTimestamp,
   FAIL_CATEGORIES,
   FINDING_CATEGORIES,
+  JIRA_STEPS,
   nonEmpty,
   PR_STATES,
   role,
@@ -235,11 +237,20 @@ export const CONTROLLER_PAYLOADS = {
     draft: opt(bool),
     state: opt(oneOf(PR_STATES)),
     approvals: opt(count),
+    needs_rebase: opt(bool),
   }),
   "pr.conflict_checked": obj({ number: int({ min: 1 }), conflicted: bool, paths: arr(nonEmpty) }),
   // DECISION: `transition` is the target status moved to; `comment` is true when a comment was added.
-  "jira.updated": obj({ transition: opt(nonEmpty), comment: opt(bool) }),
-  "jira.writeback_skipped": obj({ target: nonEmpty, available: arr(nonEmpty) }),
+  // Phase 6: `step` says which write-back point it was (start, or the PR opening).
+  "jira.updated": obj({ transition: opt(nonEmpty), comment: opt(bool), step: opt(oneOf(JIRA_STEPS)) }),
+  "jira.writeback_skipped": obj({ target: nonEmpty, available: arr(nonEmpty), step: opt(oneOf(JIRA_STEPS)) }),
+  // Phase 6: a delivery step failed (after the controller's retries when `final`).
+  "delivery.failed": obj({
+    step: oneOf(DELIVERY_STEPS),
+    reason: nonEmpty,
+    attempt: int({ min: 1 }),
+    final: bool,
+  }),
   // Commands: caused_by is the command id
   "command.applied": obj({ command: nonEmpty }),
   "command.rejected": obj({ command: nonEmpty, code: nonEmpty, reason: nonEmpty }),

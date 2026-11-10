@@ -22,6 +22,8 @@ import {
   answerAction,
   type BoardModel,
   boardModel,
+  COMPLETE_AT_LABEL,
+  COMPLETE_AT_OPTIONS,
   describeReply,
   type ExecView,
   type ExternalRow,
@@ -34,19 +36,27 @@ import {
   findingTickets,
   investigateAction,
   investigateTargets,
+  jiraStepsText,
   type NeedAction,
   type NeedItem,
   needsYou,
   nextPreparation,
   nextWorkflow,
+  PR_DRAFT_LABEL,
+  PR_DRAFT_OPTIONS,
+  type PrRow,
   parseImport,
+  prBadges,
   prepModel,
+  prRows,
+  prStateTone,
   type QuestionRow,
   questionRows,
   type RunModel,
   type RunView,
   runModel,
   type Summaries,
+  settingAction,
   startAction,
   summariesOf,
   type TicketRow,
@@ -452,7 +462,7 @@ export default class Collie extends View {
           .text_size(12)
           .text_color(t.muted)
           .child(
-            `${board.jira.project} on ${board.jira.site} · repo ${board.repo.workspace}/${board.repo.slug} (${board.repo.default_branch}) · workflow ${s.workflow} · complete at ${s.complete_at} · outside blockers count when ${s.completion_policy.mode.replaceAll("_", " ")}`,
+            `${board.jira.project} on ${board.jira.site} · repo ${board.repo.workspace}/${board.repo.slug} (${board.repo.default_branch}) · workflow ${s.workflow} · outside blockers count when ${s.completion_policy.mode.replaceAll("_", " ")}`,
           ),
       )
       .child(
@@ -503,12 +513,51 @@ export default class Collie extends View {
             );
           }),
       )
+      .child(this.runSettings(t, board))
       .child(this.ticketTable(t, board, m.rows, run))
       .child(this.prepSection(t, board))
       .when(m.externals.length > 0, (el: El) =>
         el
           .child(section(t, `Outside blockers (${m.externals.length})`))
           .child(this.externalTable(t, board, m)),
+      );
+  }
+
+  /** Run settings: when a ticket counts as complete, and when a PR opens as a draft. */
+  runSettings(t: Theme, board: Board): El {
+    const s = board.settings;
+    const chips = <K extends string>(
+      label: string,
+      options: readonly K[],
+      names: Record<string, string>,
+      current: K,
+      pick: (o: K) => Parameters<typeof settingAction>[1],
+    ) =>
+      h_flex()
+        .gap(6)
+        .items_center()
+        .child(div().w(130).text_size(12).text_color(t.muted).child(label))
+        .children(
+          options.map((o) =>
+            pill(t, `set-${label}-${o}`, names[o] ?? o, o === current, (cx: El) => {
+              if (o === current || this.busy) return;
+              const a = settingAction(board.id, pick(o));
+              this.run(cx, a.command, a.args);
+            }),
+          ),
+        );
+    return v_flex()
+      .id("run-settings")
+      .gap(6)
+      .child(
+        chips("Complete at", COMPLETE_AT_OPTIONS, COMPLETE_AT_LABEL, s.complete_at, (o) => ({
+          complete_at: o,
+        })),
+      )
+      .child(
+        chips("Pull request draft", PR_DRAFT_OPTIONS, PR_DRAFT_LABEL, s.pr_draft_policy, (o) => ({
+          pr_draft_policy: o,
+        })),
       );
   }
 
@@ -792,6 +841,7 @@ export default class Collie extends View {
 
   graph(t: Theme, board: Board, m: BoardModel, run: RunModel | null, summaries: Summaries): El {
     const needs = this.runView ? needsYou(this.runView, summaries) : [];
+    const prs = prRows(this.runView, summaries);
     const l = m.layout;
     const sel = this.selected;
     const readinessOf = new Map(m.rows.map((r) => [r.key, r.readiness]));
@@ -931,8 +981,9 @@ export default class Collie extends View {
           .h_full()
           .when(needs.length > 0, (el: El) => el.child(this.needsBanner(t, needs)))
           .child(div().id("graph-scroll").flex_1().min_h(0).overflow_scrollbar().child(canvas))
-          .child(this.deliveryBar(t, run)),
+          .child(this.deliveryBar(t, run, prs)),
       )
+      .when(prs.length > 0, (el: El) => el.child(this.prPanel(t, prs)))
       .when(!!sel && !!board.tickets[sel ?? ""], (el: El) =>
         el.child(this.inspector(t, board, m, sel as string, run)),
       );
@@ -980,8 +1031,8 @@ export default class Collie extends View {
     });
   }
 
-  /** Under the graph: the run, and the pull request panel (empty until Phase 6). */
-  deliveryBar(t: Theme, run: RunModel | null): El {
+  /** Under the graph: the run, and how many pull requests it has (the panel is at the right). */
+  deliveryBar(t: Theme, run: RunModel | null, prs: PrRow[]): El {
     return h_flex()
       .id("delivery-bar")
       .gap(14)
@@ -996,7 +1047,97 @@ export default class Collie extends View {
       .child(div().child(run ? `Run ${run.number} · ${run.status} · ${run.progress}` : "No run yet"))
       .when(!!run?.active, (el: El) => el.children(this.actionButtons(t, run?.actions ?? [])))
       .child(div().flex_1())
-      .child(div().child("Pull requests: none yet"));
+      .child(
+        div().child(
+          prs.length
+            ? `Pull requests: ${prs.length} (${prs.filter((p) => p.state === "OPEN").length} open)`
+            : "Pull requests: none yet",
+        ),
+      );
+  }
+
+  /** The Pull requests panel: the run's PRs, which stay here after the run ends while they're open. */
+  prPanel(t: Theme, prs: PrRow[]): El {
+    return v_flex()
+      .id("pr-panel")
+      .w(340)
+      .h_full()
+      .flex_none()
+      .p(14)
+      .gap(8)
+      .bg(t.surface)
+      .border_l(1)
+      .border_color(t.border)
+      .overflow_y_scrollbar()
+      .child(section(t, `Pull requests (${prs.length})`))
+      .children(prs.map((p) => this.prCard(t, p, "pr-")));
+  }
+
+  /** One PR: ticket, #id, state, badges, branches, approvals, its link and Mark ready. */
+  prCard(t: Theme, p: PrRow, prefix: string): El {
+    return v_flex()
+      .id(`${prefix}${p.ticket}`)
+      .gap(4)
+      .p(8)
+      .rounded(6)
+      .border(1)
+      .border_color(p.conflicted || p.needsRebase ? t.blocked : t.border)
+      .child(
+        h_flex()
+          .gap(8)
+          .items_center()
+          .text_size(12)
+          .child(div().font_semibold().child(p.ticket))
+          .child(div().text_color(t.muted).child(`#${p.id}`))
+          .child(toneBadge(t, prStateTone(p.state), p.state))
+          .children(
+            prBadges(p).map((b) =>
+              div()
+                .px(6)
+                .py(1)
+                .rounded(8)
+                .text_size(11)
+                .border(1)
+                .border_color(tone(t, b.tone))
+                .text_color(tone(t, b.tone))
+                .child(b.label),
+            ),
+          ),
+      )
+      .child(div().text_size(12).text_color(t.muted).truncate().child(p.branches))
+      .child(
+        div()
+          .text_size(12)
+          .text_color(t.muted)
+          .child(`${p.approvals} approval${p.approvals === 1 ? "" : "s"}`),
+      )
+      .child(
+        div()
+          .id(`${prefix}link-${p.ticket}`)
+          .text_size(12)
+          .text_color(t.accent)
+          .truncate()
+          .cursor_pointer()
+          .hover((h: El) => h.opacity(0.8))
+          .on_click((_e: unknown, cx: El) => {
+            // open_url takes an http(s) URL only; if it refuses, the url stays visible as text.
+            try {
+              cx.open_url(p.url);
+            } catch {
+              this.message = { text: `Could not open ${p.url}`, error: true };
+              cx.notify();
+            }
+          })
+          .child(p.url),
+      )
+      .when(!!p.markReady, (el: El) => {
+        const a = p.markReady as Action;
+        return el.child(
+          button(t, `${prefix}${a.id}`, a.label, this.busy || !this.alive, (cx: El) =>
+            this.run(cx, a.command, a.args),
+          ),
+        );
+      });
   }
 
   inspector(t: Theme, board: Board, m: BoardModel, key: string, run: RunModel | null): El {
@@ -1067,6 +1208,10 @@ export default class Collie extends View {
         ),
       )
       .when(!!rt.branch, (el: El) => el.child(kv(t, "Branch", rt.branch ?? "")))
+      .when(!!rt.pr, (el: El) => el.child(this.prCard(t, rt.pr as PrRow, "insp-pr-")))
+      .when(!!rt.pr || rt.jiraSteps.length > 0, (el: El) =>
+        el.child(kv(t, "Jira write-back", jiraStepsText(rt.jiraSteps))),
+      )
       .when(rt.openQuestions.length > 0, (el: El) =>
         el.children(
           rt.openQuestions.map((q) =>

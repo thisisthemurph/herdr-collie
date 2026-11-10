@@ -230,6 +230,11 @@ const extra: Record<string, FixtureEvent> = {
     { number: 148, base: "main", draft: false, state: "OPEN", approvals: 1 },
     { ticket: "PAY-102" },
   ),
+  "delivery.failed": controllerLine(
+    "delivery.failed",
+    { step: "push", reason: "Bitbucket refused the push: HTTP 403", attempt: 3, final: true },
+    { ticket: "PAY-102" },
+  ),
   "command.rejected": controllerLine(
     "command.rejected",
     { command: "question.answer", code: "invalid_state", reason: "Question already answered at 10:28." },

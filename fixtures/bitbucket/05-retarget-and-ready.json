@@ -1,0 +1,51 @@
+{
+  "step": "05-retarget-and-ready",
+  "description": "PUT a new destination and draft false together",
+  "exchanges": [
+    {
+      "request": {
+        "method": "PUT",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D/pullrequests/147",
+        "body": {
+          "destination": {
+            "branch": {
+              "name": "main"
+            }
+          },
+          "draft": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "type": "pullrequest",
+          "id": 147,
+          "state": "OPEN",
+          "draft": false,
+          "title": "PAY-102: Payment API endpoints",
+          "links": {
+            "html": {
+              "href": "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/147"
+            }
+          },
+          "source": {
+            "branch": {
+              "name": "pay-102-payment-api"
+            }
+          },
+          "destination": {
+            "branch": {
+              "name": "main"
+            }
+          },
+          "author": {
+            "uuid": "{author-uuid}"
+          }
+        }
+      }
+    }
+  ]
+}

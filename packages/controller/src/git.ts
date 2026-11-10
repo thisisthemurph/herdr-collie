@@ -61,6 +61,8 @@ export async function ensureWorktree(o: {
   path: string;
   branch: string;
   base: string;
+  /** Cut the new branch from this ref instead of `base` (a freshly fetched default branch). */
+  startPoint?: string;
   merge?: string[];
 }): Promise<{ created: boolean }> {
   if (!existsSync(o.repo) || (await git(o.repo, ["rev-parse", "--git-dir"])).code !== 0) {
@@ -75,7 +77,7 @@ export async function ensureWorktree(o: {
     (await git(o.repo, ["show-ref", "--verify", "--quiet", `refs/heads/${o.branch}`])).code === 0;
   const args = exists
     ? ["worktree", "add", o.path, o.branch]
-    : ["worktree", "add", "-b", o.branch, o.path, o.base];
+    : ["worktree", "add", "-b", o.branch, o.path, o.startPoint ?? o.base];
   const r = await git(o.repo, args);
   if (r.code !== 0) throw new WorktreeError(`git ${args.slice(0, 3).join(" ")} failed: ${r.stderr}`);
   if (!exists) {

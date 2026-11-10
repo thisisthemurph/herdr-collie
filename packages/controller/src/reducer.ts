@@ -248,6 +248,7 @@ export function reduce(s: StateFile, ev: AnyEvent): StateFile {
         if (p.draft !== undefined) pr.draft = p.draft as boolean;
         if (p.state !== undefined) pr.state = p.state as typeof pr.state;
         if (p.approvals !== undefined) pr.approvals = p.approvals as number;
+        if (p.needs_rebase !== undefined) pr.needs_rebase = p.needs_rebase as boolean;
       }
       break;
     }
@@ -259,8 +260,15 @@ export function reduce(s: StateFile, ev: AnyEvent): StateFile {
       }
       break;
     }
+    case "jira.updated":
+    case "jira.writeback_skipped": {
+      const step = p.step as "start" | "pr" | undefined;
+      const t = ev.ticket ? s.tickets[ev.ticket] : undefined;
+      if (step && t && !(t.jira_steps ?? []).includes(step)) t.jira_steps = [...(t.jira_steps ?? []), step];
+      break;
+    }
     // No state of their own: status, artifact, ask, done, fail (their effects arrive as
-    // controller events), execution.killed, jira.*, command.*, retention and worktree events.
+    // controller events), execution.killed, command.*, delivery.failed, retention and worktree events.
     default:
       break;
   }

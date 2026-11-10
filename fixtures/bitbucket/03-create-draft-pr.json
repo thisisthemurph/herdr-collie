@@ -1,0 +1,59 @@
+{
+  "step": "03-create-draft-pr",
+  "description": "POST a draft PR on a stacked branch",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D/pullrequests",
+        "body": {
+          "title": "PAY-102: Payment API endpoints",
+          "description": "Jira: https://[SITE].atlassian.net/browse/PAY-102",
+          "source": {
+            "branch": {
+              "name": "pay-102-payment-api"
+            }
+          },
+          "destination": {
+            "branch": {
+              "name": "pay-101-persistence"
+            }
+          },
+          "draft": true,
+          "close_source_branch": false
+        }
+      },
+      "response": {
+        "status": 201,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "type": "pullrequest",
+          "id": 147,
+          "state": "OPEN",
+          "draft": true,
+          "title": "PAY-102: Payment API endpoints",
+          "links": {
+            "html": {
+              "href": "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/147"
+            }
+          },
+          "source": {
+            "branch": {
+              "name": "pay-102-payment-api"
+            }
+          },
+          "destination": {
+            "branch": {
+              "name": "pay-101-persistence"
+            }
+          },
+          "author": {
+            "uuid": "{author-uuid}"
+          }
+        }
+      }
+    }
+  ]
+}

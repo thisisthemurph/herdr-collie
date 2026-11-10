@@ -7,13 +7,15 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { newUlid } from "@collie/schema";
 import { defaultAdapters } from "./adapters/index.ts";
+import { BitbucketCloud } from "./bitbucket.ts";
 import { Controller } from "./controller.ts";
-import { keychainJira } from "./credentials.ts";
+import { keychainBitbucket, keychainJira } from "./credentials.ts";
 import { seedDefaults } from "./defaults.ts";
 import { Hc, spawnHc } from "./hc.ts";
 import { defaultHome, Home } from "./home.ts";
 import { fetchHttp, JiraClient } from "./jira.ts";
 import { acquireLock, LockHeldError, releaseLock } from "./lock.ts";
+import { GitRemote } from "./remote.ts";
 
 export const TICK_MS = 50;
 
@@ -46,7 +48,18 @@ export function start(root: string): { controller: Controller; stop: () => void 
   const agents = process.env.COLLIE_NO_AGENTS
     ? null
     : { hc: new Hc(spawnHc(process.env.COLLIE_HC ?? "hc")), adapters: defaultAdapters(), briefs: jira };
-  const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira, agents);
+  // Delivery (Phase 6) needs agents to have something to deliver; COLLIE_NO_AGENTS turns both off.
+  const delivery = agents
+    ? { host: new BitbucketCloud(fetchHttp, keychainBitbucket()), remote: new GitRemote(), jira }
+    : null;
+  const controller = new Controller(
+    home,
+    { now: () => Date.now(), id: () => newUlid() },
+    log,
+    jira,
+    agents,
+    delivery,
+  );
   controller.recover();
   const seeded = seedDefaults(home);
   if (seeded.length) log(`saved the default ${seeded.join(", ")}`);

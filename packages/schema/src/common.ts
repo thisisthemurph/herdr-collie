@@ -136,6 +136,9 @@ export const COMPLETE_AT = ["implemented", "pr_created", "pr_approved", "merged"
 export const PR_DRAFT_POLICIES = ["draft_when_stacked", "always_draft"] as const;
 export const STATUS_CATEGORIES = ["new", "indeterminate", "done"] as const;
 /** Bitbucket Cloud pull request states. */
+/** The two points where the board's Jira write-back policy acts. */
+export const JIRA_STEPS = ["start", "pr"] as const;
+export const DELIVERY_STEPS = ["push", "pr", "retarget", "ready"] as const;
 export const PR_STATES = ["OPEN", "MERGED", "DECLINED", "SUPERSEDED"] as const;
 // DECISION: the protocol names "open" and "withdrawn"; answered and delivered follow its answer steps.
 export const QUESTION_STATES = ["open", "answered", "delivered", "withdrawn"] as const;

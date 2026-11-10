@@ -1,0 +1,25 @@
+{
+  "step": "07-unauthorised",
+  "description": "a rejected token",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D",
+        "body": null
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "type": "error",
+          "error": {
+            "message": "Invalid credentials"
+          }
+        }
+      }
+    }
+  ]
+}

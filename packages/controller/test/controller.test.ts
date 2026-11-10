@@ -204,7 +204,7 @@ describe("run lifecycle", () => {
       ok: false,
       error: {
         code: "unsupported",
-        message: "pr.mark_ready (needs Bitbucket) is not supported yet; it arrives in Phase 6",
+        message: "this controller has no code host",
       },
     });
     expect(await command(c, "ticket.investigate", { board_id: BOARD, tickets: ["PAY-101"] })).toMatchObject({
