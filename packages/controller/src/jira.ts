@@ -8,7 +8,7 @@ import { CommandError } from "./controller.ts";
 import type { CredentialSource } from "./credentials.ts";
 
 export type HttpRequest = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   url: string;
   headers: Record<string, string>;
   body?: string;
@@ -45,10 +45,20 @@ export type TicketBrief = {
   comments: { author: string; created: string; text: string }[];
 };
 
+/** One transition an issue offers now. */
+export type JiraTransition = { id: string; name: string; to: string };
+
+/** What delivery writes back to Jira (docs/protocol.md, "Phase 6 rules"); JiraClient is the real one. */
+export type JiraWriteback = {
+  transitions(cloudId: string, key: string): Promise<JiraTransition[]>;
+  transition(cloudId: string, key: string, transitionId: string): Promise<void>;
+  comment(cloudId: string, key: string, text: string): Promise<void>;
+};
+
 /** What the launcher needs from Jira; JiraClient is the real one. */
 export type BriefSource = { brief(cloudId: string, key: string): Promise<TicketBrief> };
 
-export class JiraClient implements BriefSource {
+export class JiraClient implements BriefSource, JiraWriteback {
   constructor(
     private readonly http: Http,
     private readonly creds: CredentialSource,
@@ -128,6 +138,36 @@ export class JiraClient implements BriefSource {
     return { description, criteria, comments };
   }
 
+  async transitions(cloudId: string, key: string): Promise<JiraTransition[]> {
+    const r = (await this.authed(cloudId, "GET", `/issue/${encodeURIComponent(key)}/transitions`)) as {
+      transitions?: { id: string; name: string; to?: { name?: string } }[];
+    };
+    return (r.transitions ?? []).map((t) => ({ id: t.id, name: t.name, to: t.to?.name ?? "" }));
+  }
+
+  async transition(cloudId: string, key: string, transitionId: string): Promise<void> {
+    await this.authed(
+      cloudId,
+      "POST",
+      `/issue/${encodeURIComponent(key)}/transitions`,
+      JSON.stringify({ transition: { id: transitionId } }),
+    );
+  }
+
+  /** Adds a plain-text comment (as an ADF document of one paragraph per line). */
+  async comment(cloudId: string, key: string, text: string): Promise<void> {
+    const content = text.split("\n").map((line) => ({
+      type: "paragraph",
+      content: line ? [{ type: "text", text: line }] : [],
+    }));
+    await this.authed(
+      cloudId,
+      "POST",
+      `/issue/${encodeURIComponent(key)}/comment`,
+      JSON.stringify({ body: { type: "doc", version: 1, content } }),
+    );
+  }
+
   private async authed(
     cloudId: string,
     method: "GET" | "POST",
@@ -158,7 +198,7 @@ export class JiraClient implements BriefSource {
     if (r.status < 200 || r.status >= 300) {
       throw new CommandError("upstream_error", `Jira returned HTTP ${r.status}: ${jiraMessage(r.body)}`);
     }
-    return JSON.parse(r.body);
+    return r.body.trim() ? JSON.parse(r.body) : {};
   }
 
   private async send(req: HttpRequest): Promise<HttpResponse> {

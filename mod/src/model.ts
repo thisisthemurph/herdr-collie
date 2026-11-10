@@ -247,6 +247,10 @@ export type TicketRunView = {
   attentionKinds: string[];
   openFindings: FindingRow[];
   openQuestions: QuestionRow[];
+  /** The ticket's pull request, when it has one (Phase 6). */
+  pr: PrRow | null;
+  /** The Jira write-backs already made: "start", "pr". */
+  jiraSteps: string[];
 };
 
 export type RunModel = {
@@ -313,7 +317,7 @@ const ATTENTION_TEXT: Record<string, string> = {
   question: "an agent asked a question",
   round_cap: "reviews found issues again at the last allowed round",
   execution_failed: "its agent failed with no attempts left",
-  delivery_error: "pushing or opening the pull request failed",
+  delivery_error: "delivery failed: pushing the branch or opening the pull request",
 };
 
 export function runModel(run: RunView | null, summaries: Summaries = {}): RunModel | null {
@@ -336,6 +340,8 @@ export function runModel(run: RunView | null, summaries: Summaries = {}): RunMod
       openQuestions: questionRows(st, "run", summaries, run.profiles).filter(
         (q) => q.ticket === key && q.state === "open",
       ),
+      pr: prRow(run.id, key, t, summaries),
+      jiraSteps: t.jira_steps ?? [],
     };
   }
   const all = Object.values(tickets);
@@ -388,6 +394,9 @@ export function ticketRunActions(runId: string, t: TicketRunView): Action[] {
     out.push(retry("Retry with a new agent"));
   else if (t.state === "needs_input" && t.attentionKinds.includes("round_cap"))
     out.push(retry("Retry (one more round)"));
+  // A completed ticket can carry delivery_error too (delivery goes on behind it), so no state check.
+  if (t.attentionKinds.includes("delivery_error") && t.state !== "cancelled")
+    out.push(retry("Retry delivery"));
   for (const e of t.executions.filter((x) => x.live))
     out.push({
       id: `cancel-exec-${e.id}`,
@@ -563,8 +572,10 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
       actions: [{ id: `answer-${q.id}`, label: "Answer", type: "answer", scope: "run", questionId: q.id }],
     });
   for (const [ticket, t] of Object.entries(st.tickets)) {
-    if (t.state === "completed" || t.state === "cancelled") continue;
+    if (t.state === "cancelled") continue;
     for (const a of t.attention) {
+      // A completed ticket is only listed for a delivery that failed behind it.
+      if (t.state === "completed" && a.kind !== "delivery_error") continue;
       const retry = (label: string): NeedAction => ({
         id: `retry-${ticket}-${a.kind}`,
         label,
@@ -608,8 +619,8 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
           kind: "delivery_error",
           ticket,
           summary: summary(ticket),
-          reason: "Pushing or opening the pull request failed.",
-          actions: [],
+          reason: "Delivery failed: pushing the branch or opening the pull request.",
+          actions: [retry("Retry delivery")],
         });
     }
   }
@@ -658,6 +669,33 @@ export function alerts(prev: RunView | null, next: RunView, summaries: Summaries
       body: n.summary ? `${n.summary}: ${n.reason}` : n.reason,
       level: "warning" as const,
     }));
+  for (const [ticket, t] of Object.entries(next.state.tickets)) {
+    const was = prev.state.tickets[ticket]?.pr ?? null;
+    const pr = t.pr;
+    if (!pr) continue;
+    const body = summaries[ticket] ?? pr.url;
+    if (!was)
+      out.push({
+        key: `pr:${ticket}:${pr.id}:opened`,
+        title: `${ticket}: PR #${pr.id} opened`,
+        body,
+        level: "info",
+      });
+    if (pr.state === "MERGED" && was?.state !== "MERGED")
+      out.push({
+        key: `pr:${ticket}:${pr.id}:merged`,
+        title: `${ticket}: PR #${pr.id} merged`,
+        body,
+        level: "success",
+      });
+    if (pr.needs_rebase && !was?.needs_rebase)
+      out.push({
+        key: `pr:${ticket}:${pr.id}:needs_rebase`,
+        title: `${ticket}: PR #${pr.id} needs a rebase`,
+        body: `${body}: its parent merged; rebase ${pr.source} onto ${pr.destination}.`,
+        level: "warning",
+      });
+  }
   if (!ENDED.includes(prev.status) && ENDED.includes(next.status)) {
     const tickets = Object.values(next.state.tickets);
     const done = tickets.filter((t) => t.state === "completed").length;
@@ -752,3 +790,115 @@ export function execChipLabel(t: Pick<TicketRunView, "executions">): { text: str
   const bits = [word, e.kind === "review" || e.kind === "remediate" ? `r${e.round}` : String(e.attempt)];
   return { text: `${bits.join(" ")}${e.blocked ? " ⏸" : ""}`, exec: e };
 }
+
+// --- pull requests (Phase 6)
+
+type TicketPr = NonNullable<StateFile["tickets"][string]["pr"]>;
+
+export type PrRow = {
+  ticket: string;
+  summary: string;
+  id: number;
+  url: string;
+  state: TicketPr["state"];
+  draft: boolean;
+  source: string;
+  destination: string;
+  /** "source → destination" */
+  branches: string;
+  approvals: number;
+  conflicted: boolean;
+  needsRebase: boolean;
+  /** Set only on a draft PR that is still open. */
+  markReady: Action | null;
+};
+
+/** Mark ready: only for a draft PR that is still open. */
+export const markReadyAction = (runId: string, ticket: string): Action => ({
+  id: `ready-${ticket}`,
+  label: "Mark ready",
+  command: "pr.mark_ready",
+  args: { run_id: runId, ticket },
+});
+
+export function prRow(
+  runId: string,
+  ticket: string,
+  t: Pick<StateFile["tickets"][string], "pr">,
+  summaries: Summaries = {},
+): PrRow | null {
+  const pr = t.pr;
+  if (!pr) return null;
+  return {
+    ticket,
+    summary: summaries[ticket] ?? "",
+    id: pr.id,
+    url: pr.url,
+    state: pr.state,
+    draft: pr.draft,
+    source: pr.source,
+    destination: pr.destination,
+    branches: `${pr.source} → ${pr.destination}`,
+    approvals: pr.approvals,
+    conflicted: pr.conflicted,
+    needsRebase: pr.needs_rebase === true,
+    markReady: pr.draft && pr.state === "OPEN" ? markReadyAction(runId, ticket) : null,
+  };
+}
+
+/** One row per ticket that has a pull request, by ticket key. Works for an ended run too. */
+export function prRows(run: RunView | null, summaries: Summaries = {}): PrRow[] {
+  if (!run) return [];
+  return Object.entries(run.state.tickets)
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .flatMap(([key, t]) => {
+      const r = prRow(run.id, key, t, summaries);
+      return r ? [r] : [];
+    });
+}
+
+/** The badges on a PR row, in order: Draft, Conflicted, Needs rebase. */
+export const prBadges = (r: PrRow): { label: string; tone: Tone }[] => [
+  ...(r.draft ? [{ label: "Draft", tone: "muted" as Tone }] : []),
+  ...(r.conflicted ? [{ label: "Conflicted", tone: "blocked" as Tone }] : []),
+  ...(r.needsRebase ? [{ label: "Needs rebase", tone: "blocked" as Tone }] : []),
+];
+
+export const prStateTone = (s: PrRow["state"]): Tone =>
+  s === "OPEN" ? "working" : s === "MERGED" ? "done" : "dim";
+
+/** "start, pr" as words for the inspector: which Jira write-backs are done. */
+export function jiraStepsText(steps: string[]): string {
+  const label = { start: "moved on start", pr: "moved on PR" } as Record<string, string>;
+  const done = (k: string) => steps.includes(k);
+  return (["start", "pr"] as const).map((k) => `${label[k]}: ${done(k) ? "done" : "not yet"}`).join(" · ");
+}
+
+// --- Board setup: run settings (Phase 6)
+
+export const COMPLETE_AT_OPTIONS = ["implemented", "pr_created", "pr_approved", "merged"] as const;
+export const PR_DRAFT_OPTIONS = ["draft_when_stacked", "always_draft"] as const;
+
+export const COMPLETE_AT_LABEL: Record<string, string> = {
+  implemented: "Implemented",
+  pr_created: "PR created",
+  pr_approved: "PR approved",
+  merged: "Merged",
+};
+export const PR_DRAFT_LABEL: Record<string, string> = {
+  draft_when_stacked: "Draft when stacked",
+  always_draft: "Always draft",
+};
+
+/** Change one run setting. The controller merges the partial settings into the board's. */
+export const settingAction = (
+  boardId: string,
+  settings:
+    | { complete_at: (typeof COMPLETE_AT_OPTIONS)[number] }
+    | { pr_draft_policy: (typeof PR_DRAFT_OPTIONS)[number] },
+): Action => ({
+  id: `setting-${Object.values(settings)[0]}`,
+  label: "Change setting",
+  command: "board.update_settings",
+  args: { board_id: boardId, settings },
+});

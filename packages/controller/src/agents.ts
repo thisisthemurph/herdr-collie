@@ -318,10 +318,30 @@ export class Agents {
     }
   }
 
-  /** Reviews done (or none needed): no delivery yet (Phase 6), so the ticket is complete. */
+  /**
+   * Reviews done (or none needed): the ticket goes to delivery. With a code host (Phase 6) it
+   * completes when its PR reaches the board's `complete_at` level (at once for `implemented`,
+   * with delivery going on behind it); without one it completes now.
+   */
   private passGate(rl: RunLog, key: string, why: string): void {
     // One step at a time: each transition is checked against the state the last one left.
-    this.c.emit(rl, [this.c.ticketTo(rl, key, "delivering", `${why}; delivery arrives in a later phase`)]);
+    const delivery = this.c.delivery;
+    this.c.emit(rl, [
+      this.c.ticketTo(rl, key, "delivering", delivery ? `${why}; delivering` : `${why}; no code host`),
+    ]);
+    if (!delivery || rl.run.snapshot.settings.complete_at === "implemented")
+      this.completeTicket(rl, key, why);
+  }
+
+  /** The PR is open: a run that was waiting on it may now end. */
+  afterPrCreated(rl: RunLog): void {
+    this.c.completeRunIfDone(rl, null);
+  }
+
+  /** `delivering → completed`: dependents may be ready, terminals are done, the run may end. */
+  completeTicket(rl: RunLog, key: string, why: string): void {
+    const t = rl.state.tickets[key];
+    if (!t || t.state === "completed") return;
     this.c.emit(rl, [this.c.ticketTo(rl, key, "completed", why)]);
     const executions = rl.state.tickets[key]?.executions ?? [];
     // Completing a ticket may ready its dependents, and may finish the run.
@@ -468,6 +488,8 @@ export class Agents {
       const finished = (snap.tickets[key]?.blocked_by ?? [])
         .filter((b) => !snap.overrides.some((o) => o.blocker === b && o.blocked === key))
         .filter((b) => rl.state.tickets[b]?.state === "completed" && rl.state.tickets[b]?.branch)
+        // Phase 6: a blocker whose PR is merged is already in the default branch.
+        .filter((b) => rl.state.tickets[b]?.pr?.state !== "MERGED")
         .sort()
         .map((b) => rl.state.tickets[b]?.branch as string);
       // DECISION: a ticket whose blockers finished in this run is stacked on the first one's
@@ -543,14 +565,27 @@ export class Agents {
           path: file.worktree,
           ref: file.branch,
         });
-      else
+      else {
+        const repo = expandHome(board.repo.local_path);
+        const base = file.base ?? board.repo.default_branch;
+        // A blocker's PR was merged: the default branch on the host has its work, the local one
+        // may not, so the branch is cut from a fresh fetch of it.
+        const merged = (rl.run.snapshot.tickets[key]?.blocked_by ?? []).some(
+          (b) => rl.state.tickets[b]?.pr?.state === "MERGED",
+        );
+        const startPoint =
+          merged && base === board.repo.default_branch && this.c.delivery
+            ? await this.c.delivery.o.remote.fetchBranch(repo, board.repo, base)
+            : undefined;
         await ensureWorktree({
-          repo: expandHome(board.repo.local_path),
+          repo,
           path: file.worktree,
           branch: file.branch,
-          base: file.base ?? board.repo.default_branch,
+          base,
+          startPoint,
           merge,
         });
+      }
       if (!this.stillCreated(rl, execId)) return;
 
       writeTextAtomic(rl.taskFile(execId), await this.brief(rl, board, profile, file));

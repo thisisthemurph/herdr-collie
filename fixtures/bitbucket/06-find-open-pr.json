@@ -1,0 +1,26 @@
+{
+  "step": "06-find-open-pr",
+  "description": "list open PRs from a source branch",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D/pullrequests?q=source.branch.name%3D%22pay-102-payment-api%22%20AND%20state%3D%22OPEN%22",
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "values": [
+            {
+              "id": 147
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -5,12 +5,15 @@ import { CommandError } from "./controller.ts";
 
 export type JiraCredentials = { email: string; token: string };
 export type CredentialSource = { jira(): Promise<JiraCredentials> };
+/** The Bitbucket access token (Bearer). Read per request; never stored. */
+export type TokenSource = { bitbucket(): Promise<string> };
 
 export const JIRA_SERVICE = "collie-jira";
+export const BITBUCKET_SERVICE = "collie-bitbucket";
 
-type Run = (args: string[]) => { code: number; stdout: string; stderr: string };
+export type Run = (args: string[]) => { code: number; stdout: string; stderr: string };
 
-const security: Run = (args) => {
+export const security: Run = (args) => {
   const p = Bun.spawnSync(["security", ...args], { stdout: "pipe", stderr: "pipe" });
   return { code: p.exitCode ?? 1, stdout: p.stdout.toString(), stderr: p.stderr.toString() };
 };
@@ -58,6 +61,36 @@ export function keychainJira(run: Run = security): CredentialSource {
         );
       }
       return { email, token };
+    },
+  };
+}
+
+/**
+ * The Bitbucket access token: the password of the one `collie-bitbucket` item. Its account field
+ * is free text, so it isn't used (a repository access token has no user).
+ */
+export function keychainBitbucket(run: Run = security): TokenSource {
+  return {
+    async bitbucket() {
+      const accounts = keychainAccounts(BITBUCKET_SERVICE, run);
+      if (accounts.length === 0) {
+        throw new CommandError(
+          "upstream_error",
+          `no keychain item named ${BITBUCKET_SERVICE}. Add one: security add-generic-password -s ${BITBUCKET_SERVICE} -a collie -w  (paste a repository access token with pullrequest:write)`,
+        );
+      }
+      if (accounts.length > 1) {
+        throw new CommandError(
+          "upstream_error",
+          `${accounts.length} keychain items are named ${BITBUCKET_SERVICE} (accounts: ${accounts.join(", ")}); Collie can't tell which to use. Keep one and delete the others with security delete-generic-password -s ${BITBUCKET_SERVICE} -a <account>`,
+        );
+      }
+      const r = run(["find-generic-password", "-s", BITBUCKET_SERVICE, "-a", accounts[0] as string, "-w"]);
+      const token = r.stdout.replace(/\n$/, "");
+      if (r.code !== 0 || !token) {
+        throw new CommandError("upstream_error", `could not read the ${BITBUCKET_SERVICE} keychain item`);
+      }
+      return token;
     },
   };
 }

@@ -189,7 +189,7 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 | Attention | `ticket.attention_added`, `ticket.attention_removed` | `kind` (`round_cap`, `execution_failed`, `delivery_error`), optional `id`; questions use the question events |
 | Questions | `question.opened`, `question.answered`, `question.delivered` | `question_id`, `answer`, `by` |
 | Execution status | `execution.agent_blocked`, `execution.agent_unblocked` | `kind` (`permission` or `question`, from hc), optional `message` (hc's `status.msg`) |
-| Delivery | `pr.created`, `pr.updated`, `pr.conflict_checked`, `jira.updated`, `jira.writeback_skipped` | `number`, `url`, `base`, `head`, `transition`; `conflicted` and `paths` for a conflict check; `target` and `available` for a skipped write-back |
+| Delivery | `pr.created`, `pr.updated`, `pr.conflict_checked`, `jira.updated`, `jira.writeback_skipped`, `delivery.failed` | `number`, `url`, `base`, `head`, `transition`; `conflicted` and `paths` for a conflict check; `target` and `available` for a skipped write-back; `step` (`start` or `pr`) on both Jira events; `step` (`push`, `pr`, `retarget`, `ready`), `reason`, `attempt` and `final` for a failed delivery step; `pr.updated` may carry `needs_rebase` |
 | Commands | `command.applied`, `command.rejected` | `command`; `code` and `reason` on rejection |
 | Retention | `worktree.kept`, `worktree.removed`, `retention.pruned` | `worktree`, `reason`, `paths` (see *Retention*) |
 
@@ -475,8 +475,10 @@ A run's files are written only by the controller. `events.jsonl` is the truth; `
       "pr": {
         "id": 147, "url": "https://bitbucket.org/...",
         "source": "pay-102-api", "destination": "pay-101-persistence",
-        "draft": true, "state": "OPEN", "approvals": 0, "conflicted": false, "conflict_checked_at": null
-      }
+        "draft": true, "state": "OPEN", "approvals": 0, "conflicted": false, "conflict_checked_at": null,
+        "needs_rebase": false
+      },
+      "jira_steps": ["start", "pr"]
     }
   },
   "executions": {
@@ -779,3 +781,25 @@ An analyst's accepted `done` sets the ticket's preparation to `ready`; its desig
 - [x] Remediation trigger: resolved under Configuration files, Workflow.
 - [x] Who starts the controller: the mod, when no live lock exists (implementation plan).
 - [x] How long ended runs are kept: resolved under Retention.
+
+## Phase 6 rules the controller applies
+
+**Delivery.** When a ticket passes its gate it goes to `delivering`, and the controller, in this order: checks the branch (commits beyond its base, clean worktree), pushes it, opens the PR, and writes back to Jira.
+- **Push.** `GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c 'credential.helper=!<helper>' push https://bitbucket.org/<workspace>/<slug>.git <branch>`, user `x-token-auth`. The helper is a one-line shell function that reads the `collie-bitbucket` keychain item when git asks, so the token is never in an argument, the environment, a file or a saved remote. The empty first `credential.helper=` stops a configured helper (osxkeychain) from saving it. `collie-bitbucket` holds the access token as its password; a second item with that service is refused, as with Jira.
+- **Destination and draft.** A ticket's PR targets its `base` branch when that is another ticket's branch, else the board's default branch. A stacked ticket waits to open its PR until its parent's PR exists. *Draft when stacked*: draft when the destination isn't the default branch. *Always draft*: always draft. The policy is the one in the run's snapshot.
+- **Title and description.** `<KEY>: <summary>`; the description has the Jira link, the ticket's description, and a findings summary (round counts and any finding still open).
+- **Retries.** Each delivery step is tried three times with backoff (2 s, then 10 s). After that: `delivery.failed` with `final: true` and `delivery_error` in the ticket's `attention`, which holds the ticket in Needs input. `ticket.retry` clears it and delivery starts again.
+- **Completion** (`complete_at`): `implemented` completes the ticket as it passes the gate and delivery goes on behind it; `pr_created` when the PR exists; `pr_approved` when it has an approval from anyone but its author; `merged` when it is merged. A run doesn't end while a ticket still has a delivery to make, so a `delivery_error` on an already completed ticket holds it too (`attention` without a state change). (DECISION)
+- **Without a code host** (tests, fake hc) a ticket completes as it passes its gate, as before.
+
+**Token check.** `run.start` reads the repository (`GET /repositories/<workspace>/<slug>`) and refuses to start when `x-oauth-scopes` lacks `pullrequest:write` (or `repository:write`), or the token can't read the repository. The reply names the scope. It also needs git 2.38 or later (for `merge-tree --write-tree`).
+
+**Tracking.** A tick polls each open PR about every 30 s: state, draft, destination, approvals (the author's own entry ignored; Collie never calls `approve`) become `pr.updated` when they changed. Each poll also fetches the destination branch into `refs/collie/dest/<branch>` and runs `git merge-tree --write-tree <that ref> <source>`: exit 1 is a conflict, logged as `pr.conflict_checked` when the answer changes (with the conflicting paths).
+- **Runs end, PRs don't.** A run's directory is read-only once it ends, with one exception: while any of its PRs is open the controller keeps loading it and appending `pr.*`, `jira.*` and `delivery.*` events. (DECISION: this narrows "read-only once ended".) Recovery loads such runs.
+- **Stack upkeep.** When a PR is merged, every open PR whose destination is that PR's branch gets `pr.updated` with the default branch as `base` and `needs_rebase: true`, and, under *Draft when stacked*, `draft: false`. Collie never rebases. `needs_rebase` clears when the default branch's head is in the child branch's history again.
+- **Mark ready.** `pr.mark_ready` (`run_id`, `ticket`) publishes a draft PR (`invalid_state` if it isn't one). It works on ended runs that still track open PRs.
+- **Declined PRs** are recorded (`state: DECLINED`) and left alone; a ticket waiting for approval or a merge that never comes is ended with `ticket.cancel`.
+
+**Base rule.** A ticket is based on the first blocker, in key order, whose branch is completed in this run and whose PR isn't merged, merging the others in; otherwise on the default branch. When a blocker's PR is merged, the controller first fetches the default branch into `refs/collie/dest/<default>` and cuts the branch from that ref, so the merged work is in it. The `base` recorded for the ticket is the branch name, which is also the PR's destination.
+
+**Jira write-back.** Per the board's `jira_writeback`: `on_start` when the ticket's first execution starts, `on_pr` when its PR is opened, each followed by a comment (with the PR link for `on_pr`) when `comment` is true. A write lists the issue's transitions, picks the one whose `to.name` matches the target (an exact transition `name` first), and logs `jira.updated`, or `jira.writeback_skipped` with the available targets. The ticket's `jira_steps` records what is done. Jira failing never fails a ticket: it is retried a few times and then logged in `controller.log`.

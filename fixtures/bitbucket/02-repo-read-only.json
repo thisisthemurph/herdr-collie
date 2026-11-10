@@ -1,0 +1,24 @@
+{
+  "step": "02-repo-read-only",
+  "description": "a token without write scopes",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://api.bitbucket.org/2.0/repositories/%5BWORKSPACE%5D/%5BREPO%5D",
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json",
+          "x-credential-type": "repo_access_token",
+          "x-oauth-scopes": "repository"
+        },
+        "body": {
+          "type": "repository"
+        }
+      }
+    }
+  ]
+}

@@ -39,9 +39,6 @@ export const DEFAULT_SETTINGS: BoardSettings = {
   jira_writeback: { on_start: "In Progress", on_pr: "In Review", comment: true },
 };
 
-const unsupported = (what: string, phase: number) =>
-  new CommandError("unsupported", `${what} is not supported yet; it arrives in Phase ${phase}`);
-
 type Args<K extends Command["command"]> = Extract<Command, { command: K }>["args"];
 
 export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
@@ -154,8 +151,10 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
       return ticketInvestigate(c, cmd.args);
     case "ticket.retry":
       return ticketRetry(c, cmd.id, cmd.args);
-    case "pr.mark_ready":
-      throw unsupported("pr.mark_ready (needs Bitbucket)", 6);
+    case "pr.mark_ready": {
+      if (!c.delivery) throw new CommandError("unsupported", "this controller has no code host");
+      return c.delivery.markReady(c.requireRunOrTracked(cmd.args.run_id), cmd.args.ticket).then(() => ({}));
+    }
   }
 }
 
@@ -236,7 +235,7 @@ function loadConfig<T>(path: string, what: string, validate: (v: unknown) => Res
   return r.value;
 }
 
-function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
+async function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Promise<Ok> {
   // DECISION: the run id is the command id, so a command re-run after a crash is a no-op.
   if (existsSync(c.home.runFile(cmdId))) return { run_id: cmdId };
   const board = c.loadBoard(a.board_id);
@@ -254,6 +253,8 @@ function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
     .sort();
   if (keys.length === 0) throw new CommandError("invalid_state", `board ${board.id} has no tickets to run`);
   requireNoCycle(board);
+  // The token's scopes and git's version are checked before any agent starts (plan, Phase 6).
+  await c.delivery?.preflight(board);
   const held = c.leases();
   const conflicts = keys.filter((k) => held.has(k));
   if (conflicts.length) {
@@ -432,6 +433,21 @@ function ticketInvestigate(c: Controller, a: Args<"ticket.investigate">): Ok {
  * (a developer, a reviewer or a remediation, whichever failed). A ticket held at the round cap
  * gets one more remediation round.
  */
+/** `delivery_error` cleared: delivery starts again from the state (a held ticket resumes). */
+function retryDelivery(c: Controller, cmdId: string, rl: RunLog, ticket: string): Ok {
+  const t = rl.state.tickets[ticket] as RunLog["state"]["tickets"][string];
+  if (rl.state.status !== "running")
+    throw new CommandError("invalid_state", `run ${rl.id} is ${rl.state.status}; resume it first`);
+  const o = { ticket, cause: cmdId, source: "human" as const };
+  const events = [c.event(rl.id, "ticket.attention_removed", { kind: "delivery_error" }, o)];
+  const left = t.attention.filter((x) => x.kind !== "delivery_error");
+  if (t.state === "needs_input" && left.length === 0 && t.resume_state)
+    events.push(c.ticketTo(rl, ticket, t.resume_state, "retried by a person", o));
+  c.emit(rl, events);
+  c.delivery?.reset(rl.id, ticket);
+  return { execution_id: null, execution_ids: [] };
+}
+
 function ticketRetry(c: Controller, cmdId: string, a: Args<"ticket.retry">): Ok {
   const rl = c.requireRun(a.run_id);
   const t = rl.state.tickets[a.ticket];
@@ -439,6 +455,8 @@ function ticketRetry(c: Controller, cmdId: string, a: Args<"ticket.retry">): Ok 
   if (!c.agents) throw new CommandError("unsupported", "this controller can't start agents");
   const failed = t.attention.filter((x) => x.kind === "execution_failed");
   const capped = t.attention.some((x) => x.kind === "round_cap");
+  const undelivered = t.attention.some((x) => x.kind === "delivery_error");
+  if (undelivered) return retryDelivery(c, cmdId, rl, a.ticket);
   if (t.state !== "needs_input" || (failed.length === 0 && !capped))
     throw new CommandError(
       "invalid_state",

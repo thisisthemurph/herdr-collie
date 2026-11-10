@@ -1,1 +1,1 @@
-{"v":1,"id":"01M6XARVH8000000000000000R","type":"worktree.removed","ts":"2026-11-08T10:20:25.000Z","source":"controller","run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB","execution_id":null,"ticket":null,"caused_by":null,"payload":{"worktree":"~/.herdr/worktrees/[REPO]/pay-101-persistence"}}
+{"v":1,"id":"01M6XARWGG000000000000000S","type":"worktree.removed","ts":"2026-11-08T10:20:26.000Z","source":"controller","run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB","execution_id":null,"ticket":null,"caused_by":null,"payload":{"worktree":"~/.herdr/worktrees/[REPO]/pay-101-persistence"}}

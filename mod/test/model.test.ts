@@ -7,6 +7,7 @@ import {
   alerts,
   answerAction,
   boardModel,
+  COMPLETE_AT_OPTIONS,
   describeReply,
   excludeAction,
   execChipLabel,
@@ -16,14 +17,19 @@ import {
   findingTickets,
   investigateAction,
   investigateTargets,
+  jiraStepsText,
   needsYou,
   nextPreparation,
   nextWorkflow,
+  PR_DRAFT_OPTIONS,
   parseImport,
+  prBadges,
   prepModel,
+  prRows,
   questionRows,
   type RunView,
   runModel,
+  settingAction,
   startAction,
   ticketRunActions,
   watchCommand,
@@ -757,6 +763,122 @@ describe("questions, findings and the Needs you banner (Phase 5)", () => {
       });
       expect(items[0]?.notes.map((n) => n.title)).toEqual(["Split this ticket"]);
       expect(prepModel(board, null)).toEqual([]);
+    });
+  });
+  describe("Phase 6: pull requests and delivery", () => {
+    const pr = (over: Partial<NonNullable<RunView["state"]["tickets"][string]["pr"]>> = {}) => ({
+      id: 147,
+      url: "https://bitbucket.org/[WORKSPACE]/[REPO]/pull-requests/147",
+      source: "pay-1",
+      destination: "main",
+      draft: false,
+      state: "OPEN" as const,
+      approvals: 0,
+      conflicted: false,
+      conflict_checked_at: null,
+      ...over,
+    });
+    const withPr = (over = {}, status: RunView["status"] = "running"): RunView => {
+      const v = view(status);
+      const t = v.state.tickets["PAY-1"];
+      if (!t) throw new Error("fixture");
+      t.pr = pr(over);
+      t.jira_steps = ["start"];
+      return v;
+    };
+
+    test("one PR row per ticket with a PR; Mark ready only on an open draft", () => {
+      expect(prRows(view(), summaries)).toEqual([]);
+      const rows = prRows(
+        withPr({ draft: true, approvals: 2, conflicted: true, needs_rebase: true }),
+        summaries,
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        ticket: "PAY-1",
+        summary: "Add the table",
+        id: 147,
+        branches: "pay-1 → main",
+        approvals: 2,
+        markReady: { command: "pr.mark_ready", args: { run_id: RUN, ticket: "PAY-1" } },
+      });
+      expect(rows[0] && prBadges(rows[0]).map((b) => b.label)).toEqual([
+        "Draft",
+        "Conflicted",
+        "Needs rebase",
+      ]);
+      expect(prRows(withPr({ draft: false }))[0]?.markReady).toBeNull();
+      expect(prRows(withPr({ draft: true, state: "MERGED" }))[0]?.markReady).toBeNull();
+      expect(prRows(withPr({ draft: true, state: "DECLINED" }))[0]?.markReady).toBeNull();
+    });
+
+    test("an ended run still lists its PRs", () => {
+      expect(prRows(withPr({ draft: true }, "completed"))).toHaveLength(1);
+    });
+
+    test("the ticket view carries the PR and the Jira steps", () => {
+      const t = runModel(withPr(), summaries)?.tickets["PAY-1"];
+      expect(t?.pr?.id).toBe(147);
+      expect(t?.jiraSteps).toEqual(["start"]);
+      expect(jiraStepsText(["start"])).toBe("moved on start: done · moved on PR: not yet");
+    });
+
+    test("a delivery error shows on the banner with Retry, also on a completed ticket", () => {
+      const v = view();
+      const t1 = v.state.tickets["PAY-1"];
+      const t2 = v.state.tickets["PAY-2"];
+      if (!t1 || !t2) throw new Error("fixture");
+      t1.state = "completed";
+      t1.attention = [{ kind: "delivery_error" }];
+      t2.state = "needs_input";
+      t2.attention = [{ kind: "delivery_error" }];
+      const items = needsYou(v, summaries);
+      expect(items.map((i) => [i.ticket, i.kind])).toEqual([
+        ["PAY-1", "delivery_error"],
+        ["PAY-2", "delivery_error"],
+      ]);
+      expect(items[0]?.reason).toContain("Delivery failed");
+      expect(items[0]?.actions[0]).toMatchObject({ type: "ctl", command: "ticket.retry" });
+      // A completed ticket with no attention is not listed.
+      t1.attention = [];
+      expect(needsYou(v, summaries).map((i) => i.ticket)).toEqual(["PAY-2"]);
+      const m = runModel(v, summaries);
+      expect(ticketRunActions(RUN, m?.tickets["PAY-2"] as never).map((a) => a.label)).toEqual([
+        "Retry delivery",
+        "Cancel ticket",
+      ]);
+    });
+
+    test("a new PR, a merge and a new needs_rebase are each announced once", () => {
+      const opened = alerts(view(), withPr(), summaries);
+      expect(opened.map((a) => [a.key, a.title])).toEqual([[`pr:PAY-1:147:opened`, "PAY-1: PR #147 opened"]]);
+      expect(alerts(withPr(), withPr(), summaries)).toEqual([]);
+      const merged = alerts(withPr(), withPr({ state: "MERGED" }), summaries);
+      expect(merged.map((a) => a.title)).toEqual(["PAY-1: PR #147 merged"]);
+      expect(alerts(withPr({ state: "MERGED" }), withPr({ state: "MERGED" }), summaries)).toEqual([]);
+      const rebase = alerts(withPr(), withPr({ needs_rebase: true }), summaries);
+      expect(rebase.map((a) => [a.level, a.title])).toEqual([["warning", "PAY-1: PR #147 needs a rebase"]]);
+      expect(alerts(withPr({ needs_rebase: true }), withPr({ needs_rebase: true }), summaries)).toEqual([]);
+      expect(alerts(withPr({ needs_rebase: true }), withPr({ needs_rebase: false }), summaries)).toEqual([]);
+    });
+
+    test("every new button sends a command the controller accepts", () => {
+      const cmds = [
+        ...prRows(withPr({ draft: true })).flatMap((r) => (r.markReady ? [r.markReady] : [])),
+        ...COMPLETE_AT_OPTIONS.map((o) => settingAction(BOARD, { complete_at: o })),
+        ...PR_DRAFT_OPTIONS.map((o) => settingAction(BOARD, { pr_draft_policy: o })),
+      ];
+      expect(cmds).toHaveLength(7);
+      for (const a of cmds) {
+        const r = validateCommand({
+          v: 1,
+          id: "01JC9A0C000000000000000001",
+          command: a.command,
+          at: "2026-11-09T10:00:00Z",
+          args: a.args,
+        });
+        if (!r.ok) throw new Error(`${a.command}: ${formatIssues(r.issues)}`);
+      }
     });
   });
 });

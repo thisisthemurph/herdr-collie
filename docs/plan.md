@@ -273,12 +273,12 @@ PR tracking continues after a ticket completes, and after its run ends, until ea
 
 **Done when**
 
-- [ ] Two dependent tickets produce stacked Bitbucket PRs with the correct destination branches; an independent ticket's PR targets the default branch.
-- [ ] Under *Draft when stacked*, the independent PR opens ready for review and the stacked one as a draft; under *Always draft*, both open as drafts.
-- [ ] Merging the parent PR flags the child for rebase, retargets it, and, under *Draft when stacked*, marks it ready.
-- [ ] Mark ready in the PR panel publishes a draft PR.
-- [ ] Jira transitions and comments appear in a test project as the policy says.
-- [ ] The Bitbucket token never appears in `events.jsonl`, logs, agent environments or Git remote URLs saved to disk.
+- [x] Two dependent tickets produce stacked Bitbucket PRs with the correct destination branches; an independent ticket's PR targets the default branch.
+- [x] Under *Draft when stacked*, the independent PR opens ready for review and the stacked one as a draft; under *Always draft*, both open as drafts.
+- [x] Merging the parent PR flags the child for rebase, retargets it, and, under *Draft when stacked*, marks it ready.
+- [x] Mark ready in the PR panel publishes a draft PR. *(Controller command tested; the button not pressed in real Herdr.)*
+- [ ] Jira transitions and comments appear in a test project as the policy says. *(Tested against a fake Jira; the demo step against a real test project is open.)*
+- [x] The Bitbucket token never appears in `events.jsonl`, logs, agent environments or Git remote URLs saved to disk.
 
 ## Phase 7 — Hardening and MVP acceptance
 

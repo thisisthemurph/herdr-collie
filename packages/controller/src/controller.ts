@@ -16,6 +16,7 @@ import {
 } from "@collie/schema";
 import { type AgentOptions, Agents } from "./agents.ts";
 import { handleCommand } from "./commands.ts";
+import { Delivery, type DeliveryOptions } from "./delivery.ts";
 import { type Clock, type EventOpts, makeEvent } from "./events.ts";
 import { type Home, readJson, writeJsonAtomic } from "./home.ts";
 import { processInbox, resumeTicketIfClear } from "./inbox.ts";
@@ -46,6 +47,10 @@ export class Controller {
   readonly runs = new Map<string, RunLog>();
   /** Boards' preparation logs (the requirements analyst), by board id. They aren't runs. */
   readonly preps = new Map<string, RunLog>();
+  /** Ended runs that still have an open PR: they stay loaded so its tracking can be written down. */
+  readonly tracked = new Map<string, RunLog>();
+  /** Delivery to the code host (Phase 6). Null without one: tickets complete as they pass the gate. */
+  readonly delivery: Delivery | null;
   /** The command being handled, so a run it ends can log it before ending. */
   private currentCommand: { id: string; command: string } | null = null;
 
@@ -58,8 +63,10 @@ export class Controller {
     readonly log: Logger,
     private readonly jira: JiraClient | null = null,
     agentOptions: AgentOptions | null = null,
+    deliveryOptions: DeliveryOptions | null = null,
   ) {
     this.agents = agentOptions ? new Agents(this, agentOptions) : null;
+    this.delivery = deliveryOptions ? new Delivery(this, deliveryOptions) : null;
   }
 
   /** Every log with executions to watch: the live runs, then the boards' preparation logs. */
@@ -99,7 +106,10 @@ export class Controller {
     for (const id of readdirSync(this.home.runs).sort()) {
       if (!existsSync(this.home.runFile(id))) continue;
       const run = readJson(this.home.runFile(id)) as RunFile;
-      if (run.status !== "running" && run.status !== "paused") continue;
+      if (run.status !== "running" && run.status !== "paused") {
+        this.recoverTracked(id);
+        continue;
+      }
       const rl = RunLog.load(this.home, id, this.log);
       // A crash between the final event and the run.json rewrite: the log wins.
       if (rl.state.status !== rl.run.status) this.syncRunFile(rl);
@@ -109,6 +119,27 @@ export class Controller {
     }
     this.saveLeases();
     this.recoverPreps();
+  }
+
+  /**
+   * An ended run is read-only, except that while one of its PRs is open the controller keeps
+   * tracking it (protocol, "Phase 6 rules"). The cheap check is the saved state.json.
+   */
+  private recoverTracked(id: string): void {
+    if (!this.delivery || !existsSync(this.home.state(id))) return;
+    try {
+      const s = readJson(this.home.state(id)) as {
+        tickets?: Record<string, { pr?: { state?: string } | null }>;
+      };
+      if (!Object.values(s.tickets ?? {}).some((t) => t.pr?.state === "OPEN")) return;
+      const rl = RunLog.load(this.home, id, this.log);
+      if (this.delivery.hasOpenPrs(rl)) {
+        this.tracked.set(id, rl);
+        this.log(`tracking the open PRs of ended run ${id}`);
+      }
+    } catch (e) {
+      this.log(`run ${id}: couldn't load it to track its PRs: ${(e as Error).message}`);
+    }
   }
 
   /** Boards that have analyst executions get their preparation log back. */
@@ -156,12 +187,22 @@ export class Controller {
     for (const rl of [...this.runs.values(), ...this.preps.values()]) {
       for (const execId of Object.keys(rl.state.executions)) this.sweepInbox(rl, execId);
       this.agents?.tick(rl);
+      if (!rl.prep) this.delivery?.tick(rl);
       rl.maybeFlush(this.clock.now());
+    }
+    for (const [id, rl] of this.tracked) {
+      this.delivery?.tick(rl);
+      rl.maybeFlush(this.clock.now());
+      if (!this.delivery?.hasOpenPrs(rl)) {
+        rl.flush(this.clock.now());
+        this.tracked.delete(id);
+        this.log(`run ${id}: no open PRs left to track`);
+      }
     }
   }
 
   flushAll(): void {
-    for (const rl of this.allLogs()) rl.flush(this.clock.now());
+    for (const rl of [...this.allLogs(), ...this.tracked.values()]) rl.flush(this.clock.now());
   }
 
   // --- control commands
@@ -238,7 +279,7 @@ export class Controller {
     this.currentCommand = null;
     // A run command is logged in the run it acts on (run.start logs its own command.applied).
     const runId = (cmd.args as { run_id?: string }).run_id;
-    const rl = runId ? this.logFor(runId) : undefined;
+    const rl = runId ? (this.logFor(runId) ?? this.tracked.get(runId)) : undefined;
     if (rl && !rl.commandIds.has(cmd.id)) {
       const o = { cause: cmd.id, source: "human" as const };
       this.emit(rl, [
@@ -328,6 +369,8 @@ export class Controller {
     if (rl.state.status !== "running") return;
     const keys = rl.state.leases;
     if (keys.length && !keys.every((k) => isTicketFinal(rl.state.tickets[k]?.state ?? "pending"))) return;
+    // A completed ticket whose PR isn't open yet (`implemented`, or a delivery that failed) keeps the run going.
+    if (this.delivery?.pending(rl)) return;
     this.endRun(rl, "completed", "every ticket completed or cancelled", cause, "controller");
   }
 
@@ -352,6 +395,7 @@ export class Controller {
     this.syncRunFile(rl);
     rl.flush(this.clock.now());
     this.runs.delete(rl.id);
+    if (this.delivery?.hasOpenPrs(rl)) this.tracked.set(rl.id, rl);
     this.saveLeases();
   }
 
@@ -396,6 +440,11 @@ export class Controller {
   /** requireRun, but a board id names its preparation log (for answers and cancels, which work there too). */
   requireLog(id: string): RunLog {
     return this.preps.get(id) ?? this.requireRun(id);
+  }
+
+  /** requireRun, but an ended run that still tracks open PRs counts (for pr.mark_ready). */
+  requireRunOrTracked(runId: string): RunLog {
+    return this.runs.get(runId) ?? this.tracked.get(runId) ?? this.requireRun(runId);
   }
 
   requireRun(runId: string): RunLog {

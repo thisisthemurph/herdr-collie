@@ -14,6 +14,7 @@ import { join } from "node:path";
 import type { Board, StateFile } from "@collie/schema";
 import { type Adapters, defaultAdapters } from "../src/adapters/index.ts";
 import { Controller } from "../src/controller.ts";
+import type { DeliveryOptions } from "../src/delivery.ts";
 import { Hc, spawnHc } from "../src/hc.ts";
 import type { BriefSource } from "../src/jira.ts";
 import type { RunLog } from "../src/runlog.ts";
@@ -101,6 +102,8 @@ export function harness(
     options?: Record<string, unknown>;
     profile?: Record<string, unknown>;
     repoPath?: string;
+    /** A code host for delivery (Phase 6). Without one, tickets complete as they pass the gate. */
+    delivery?: Partial<DeliveryOptions> & Pick<DeliveryOptions, "host" | "remote">;
   } = {},
 ): Harness {
   const s = scratchHome();
@@ -150,17 +153,26 @@ export function harness(
     ...opts.hcEnv,
   });
   const make = () =>
-    new Controller(s.home, clock, (m) => log.push(m), null, {
-      hc,
-      adapters: opts.adapters ?? defaultAdapters(() => "/usr/local/bin/claude"),
-      briefs: opts.briefs ?? null,
-      worktreeRoot: worktrees,
-      pollMs: 1_000,
-      graceMs: 30_000,
-      startTimeoutMs: 60_000,
-      waitSeconds: 1,
-      ...opts.options,
-    });
+    new Controller(
+      s.home,
+      clock,
+      (m) => log.push(m),
+      null,
+      {
+        hc,
+        adapters: opts.adapters ?? defaultAdapters(() => "/usr/local/bin/claude"),
+        briefs: opts.briefs ?? null,
+        worktreeRoot: worktrees,
+        pollMs: 1_000,
+        graceMs: 30_000,
+        startTimeoutMs: 60_000,
+        waitSeconds: 1,
+        ...opts.options,
+      },
+      opts.delivery
+        ? { worktreeRoot: worktrees, backoffMs: [0, 0], pollMs: 1_000, jiraRetryMs: 1_000, ...opts.delivery }
+        : null,
+    );
   const h: Harness = {
     s,
     c: make(),
@@ -175,7 +187,14 @@ export function harness(
         ? readFileSync(join(hcDir, "calls.jsonl"), "utf8")
             .split("\n")
             .filter(Boolean)
-            .map((l) => JSON.parse(l))
+            .flatMap((l) => {
+              // fake-hc may be midway through appending the last line.
+              try {
+                return [JSON.parse(l)];
+              } catch {
+                return [];
+              }
+            })
         : [],
     restart: () => {
       h.c = make();
@@ -192,7 +211,7 @@ export function harness(
       }
       throw new Error(
         `gave up waiting for ${what}\ncontroller log:\n${log.join("\n")}\nlast events:\n${JSON.stringify(
-          readEvents(s.home, [...h.c.runs.keys()][0] ?? "").slice(-8),
+          [...h.c.runs.keys(), ...h.c.tracked.keys()].flatMap((id) => readEvents(s.home, id).slice(-12)),
           null,
           1,
         )}`,
@@ -203,7 +222,10 @@ export function harness(
       if (!rl) throw new Error(`run ${runId} has ended`);
       return rl;
     },
-    state: (runId) => h.c.runs.get(runId)?.state ?? JSON.parse(readFileSync(s.home.state(runId), "utf8")),
+    state: (runId) =>
+      h.c.runs.get(runId)?.state ??
+      h.c.tracked.get(runId)?.state ??
+      JSON.parse(readFileSync(s.home.state(runId), "utf8")),
     report: (runId, execId, type, payload) => {
       const ticket = h.state(runId).executions[execId]?.ticket as string;
       appendFileSync(s.home.inbox(runId, execId), agentLine(runId, execId, ticket, type, payload));
@@ -231,6 +253,7 @@ export function harness(
     cleanup: async () => {
       // Background work (a kill, a launch) may still be writing to the run's folder.
       await h.c.agents?.drain();
+      await h.c.delivery?.drain();
       s.cleanup();
       rmSync(root, { recursive: true, force: true });
     },

@@ -168,6 +168,9 @@ test("fixtures contain no real site, workspace or repository names", () => {
   const grep = (re: string) =>
     Bun.spawnSync(["grep", "-rhoE", re, FIXTURES]).stdout.toString().split("\n").filter(Boolean);
   expect(grep("[a-z0-9-]+\\.atlassian\\.net")).toEqual([]);
+  // The REST API form has the placeholders percent-encoded, as the client sends them.
   for (const url of grep('bitbucket\\.org/[^"]+'))
-    expect(url, url).toContain("bitbucket.org/[WORKSPACE]/[REPO]");
+    expect(url, url).toMatch(
+      /bitbucket\.org\/(\[WORKSPACE\]\/\[REPO\]|2\.0\/repositories\/%5BWORKSPACE%5D\/%5BREPO%5D)/,
+    );
 });

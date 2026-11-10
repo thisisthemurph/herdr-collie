@@ -1,0 +1,1 @@
+{"v":1,"id":"01M6XARQM8000000000000000M","type":"delivery.failed","ts":"2026-11-08T10:20:21.000Z","source":"controller","run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB","execution_id":null,"ticket":"PAY-102","caused_by":null,"payload":{"step":"push","reason":"Bitbucket refused the push: HTTP 403","attempt":3,"final":true}}
