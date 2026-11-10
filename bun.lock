@@ -18,6 +18,21 @@
         "@collie/schema": "workspace:*",
       },
     },
+    "mod": {
+      "name": "@collie/mod",
+      "version": "0.0.0",
+      "dependencies": {
+        "@collie/board": "workspace:*",
+        "@collie/schema": "workspace:*",
+      },
+    },
+    "packages/board": {
+      "name": "@collie/board",
+      "version": "0.0.0",
+      "dependencies": {
+        "@collie/schema": "workspace:*",
+      },
+    },
     "packages/cli": {
       "name": "@collie/cli",
       "version": "0.0.0",
@@ -35,6 +50,7 @@
         "collie-controller": "bin/collie-controller",
       },
       "dependencies": {
+        "@collie/board": "workspace:*",
         "@collie/schema": "workspace:*",
       },
     },
@@ -54,6 +70,14 @@
       "version": "0.0.0",
       "bin": {
         "hc": "bin/hc",
+      },
+    },
+    "tools/jira-record": {
+      "name": "@collie/jira-record",
+      "version": "0.0.0",
+      "dependencies": {
+        "@collie/board": "workspace:*",
+        "@collie/schema": "workspace:*",
       },
     },
   },
@@ -80,6 +104,8 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.6", "", { "os": "win32", "cpu": "x64" }, "sha512-B7KMG26A4I9lAuxwBGMmiVcjMGAeJRoz+pzFt9brRvOAsIrgOu8ptJld5rUWui6tM1uiJwxeJhhDPuAiZtxXdw=="],
 
+    "@collie/board": ["@collie/board@workspace:packages/board"],
+
     "@collie/cli": ["@collie/cli@workspace:packages/cli"],
 
     "@collie/controller": ["@collie/controller@workspace:packages/controller"],
@@ -89,6 +115,10 @@
     "@collie/fake-hc": ["@collie/fake-hc@workspace:tools/fake-hc"],
 
     "@collie/fixtures": ["@collie/fixtures@workspace:fixtures"],
+
+    "@collie/jira-record": ["@collie/jira-record@workspace:tools/jira-record"],
+
+    "@collie/mod": ["@collie/mod@workspace:mod"],
 
     "@collie/schema": ["@collie/schema@workspace:packages/schema"],
 

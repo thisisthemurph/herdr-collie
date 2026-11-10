@@ -3,3 +3,4 @@ node_modules/
 dist/
 .fake-hc/
 *.bun-build
+mod/dist/

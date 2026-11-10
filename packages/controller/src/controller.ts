@@ -16,6 +16,7 @@ import { handleCommand } from "./commands.ts";
 import { type Clock, type EventOpts, makeEvent } from "./events.ts";
 import { type Home, readJson, writeJsonAtomic } from "./home.ts";
 import { processInbox, resumeTicketIfClear } from "./inbox.ts";
+import type { JiraClient } from "./jira.ts";
 import {
   EXECUTION_TRANSITIONS,
   isExecutionFinal,
@@ -47,7 +48,13 @@ export class Controller {
     readonly home: Home,
     readonly clock: Clock,
     readonly log: Logger,
+    private readonly jira: JiraClient | null = null,
   ) {}
+
+  requireJira(): JiraClient {
+    if (!this.jira) throw new CommandError("unsupported", "this controller has no Jira client");
+    return this.jira;
+  }
 
   // --- start-up
 
@@ -70,9 +77,15 @@ export class Controller {
 
   // --- the loop
 
-  /** One pass: pending commands, then every watched inbox, then due state.json writes. */
+  /**
+   * One pass: start on pending commands (they run one at a time, and may wait on Jira), then
+   * every watched inbox, then due state.json writes. State only changes between awaits, so a
+   * command and the inbox watcher never see each other half-done.
+   */
   tick(): void {
-    this.processCommands();
+    if (!this.commandsBusy) {
+      this.processCommands().catch((e) => this.log(`command loop failed: ${(e as Error).stack ?? e}`));
+    }
     for (const rl of [...this.runs.values()]) {
       for (const execId of Object.keys(rl.state.executions)) processInbox(rl, execId, this.home, this.clock);
       rl.maybeFlush(this.clock.now());
@@ -85,19 +98,33 @@ export class Controller {
 
   // --- control commands
 
-  processCommands(): void {
-    let files: string[];
-    try {
-      files = readdirSync(this.home.pending)
-        .filter((f) => f.endsWith(".json"))
-        .sort();
-    } catch {
-      return;
-    }
-    for (const f of files) this.processCommandFile(join(this.home.pending, f));
+  private commandsBusy: Promise<void> | null = null;
+
+  /** Handles every pending command in id order, one at a time. */
+  processCommands(): Promise<void> {
+    // A pass already running may have listed the folder before a new file arrived: wait for
+    // it, then look again.
+    if (this.commandsBusy) return this.commandsBusy.then(() => this.processCommands());
+    const work = async () => {
+      let files: string[];
+      try {
+        files = readdirSync(this.home.pending)
+          .filter((f) => f.endsWith(".json"))
+          .sort();
+      } catch {
+        return;
+      }
+      for (const f of files) await this.processCommandFile(join(this.home.pending, f));
+    };
+    // Cleared in .finally(), which always runs after this assignment, even when `work`
+    // finishes synchronously (no pending files).
+    this.commandsBusy = work().finally(() => {
+      this.commandsBusy = null;
+    });
+    return this.commandsBusy;
   }
 
-  private processCommandFile(path: string): void {
+  private async processCommandFile(path: string): Promise<void> {
     const name = path.split("/").at(-1) as string;
     const donePath = join(this.home.done, name);
     if (existsSync(donePath)) {
@@ -131,7 +158,7 @@ export class Controller {
     let outcome: Outcome;
     this.currentCommand = { id: cmd.id, command: cmd.command };
     try {
-      outcome = { ok: true, result: handleCommand(this, cmd) };
+      outcome = { ok: true, result: await handleCommand(this, cmd) };
     } catch (e) {
       if (e instanceof CommandError) {
         outcome = { ok: false, code: e.code, message: e.message };

@@ -11,6 +11,7 @@
     "collie-controller": "bin/collie-controller"
   },
   "dependencies": {
-    "@collie/schema": "workspace:*"
+    "@collie/schema": "workspace:*",
+    "@collie/board": "workspace:*"
   }
 }

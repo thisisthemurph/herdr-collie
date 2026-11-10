@@ -1,0 +1,296 @@
+{
+  "v": 1,
+  "id": "01JC8XW0000000000000000001",
+  "name": "Shape: spike-20",
+  "jira": {
+    "site": "[SITE].atlassian.net",
+    "cloud_id": "[CLOUD-ID]",
+    "project": "PAY"
+  },
+  "repo": {
+    "workspace": "[WORKSPACE]",
+    "slug": "[REPO]",
+    "default_branch": "main",
+    "local_path": "~/code/[REPO]"
+  },
+  "settings": {
+    "workflow": "standard-feature",
+    "max_tickets": 3,
+    "max_agents": 6,
+    "completion_policy": {
+      "mode": "done_or_resolved",
+      "statuses": []
+    },
+    "complete_at": "pr_created",
+    "pr_draft_policy": "draft_when_stacked",
+    "jira_writeback": {
+      "on_start": "In Progress",
+      "on_pr": "In Review",
+      "comment": true
+    }
+  },
+  "tickets": {
+    "EXT-9": {
+      "summary": "Ticket EXT-9",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [],
+      "on_board": false,
+      "preparation": "unreviewed",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-101": {
+      "summary": "Ticket PAY-101",
+      "jira_status": "Done",
+      "status_category": "done",
+      "resolution": "Done",
+      "blocked_by": [],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-102": {
+      "summary": "Ticket PAY-102",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-103": {
+      "summary": "Ticket PAY-103",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-104": {
+      "summary": "Ticket PAY-104",
+      "jira_status": "Done",
+      "status_category": "done",
+      "resolution": "Done",
+      "blocked_by": [
+        "PAY-101"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-105": {
+      "summary": "Ticket PAY-105",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-101",
+        "PAY-102"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-106": {
+      "summary": "Ticket PAY-106",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "EXT-9",
+        "PAY-102"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-107": {
+      "summary": "Ticket PAY-107",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-103"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-108": {
+      "summary": "Ticket PAY-108",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-103"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-109": {
+      "summary": "Ticket PAY-109",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-104"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-110": {
+      "summary": "Ticket PAY-110",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-105"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-111": {
+      "summary": "Ticket PAY-111",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-105",
+        "PAY-106"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-112": {
+      "summary": "Ticket PAY-112",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-107",
+        "PAY-108"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-113": {
+      "summary": "Ticket PAY-113",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-108"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-114": {
+      "summary": "Ticket PAY-114",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-109"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-115": {
+      "summary": "Ticket PAY-115",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-110",
+        "PAY-111"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-116": {
+      "summary": "Ticket PAY-116",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-111"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-117": {
+      "summary": "Ticket PAY-117",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-112",
+        "PAY-113"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-118": {
+      "summary": "Ticket PAY-118",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-115",
+        "PAY-116"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    },
+    "PAY-119": {
+      "summary": "Ticket PAY-119",
+      "jira_status": "To Do",
+      "status_category": "new",
+      "resolution": null,
+      "blocked_by": [
+        "PAY-114",
+        "PAY-117"
+      ],
+      "on_board": true,
+      "preparation": "ready",
+      "workflow": null,
+      "fetched_at": "2026-11-08T09:40:00Z"
+    }
+  },
+  "overrides": [],
+  "updated_at": "2026-11-08T09:52:00Z"
+}

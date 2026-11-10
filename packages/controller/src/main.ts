@@ -7,7 +7,9 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { newUlid } from "@collie/schema";
 import { Controller } from "./controller.ts";
+import { keychainJira } from "./credentials.ts";
 import { defaultHome, Home } from "./home.ts";
+import { fetchHttp, JiraClient } from "./jira.ts";
 import { acquireLock, LockHeldError, releaseLock } from "./lock.ts";
 
 export const TICK_MS = 50;
@@ -35,7 +37,8 @@ export function start(root: string): { controller: Controller; stop: () => void 
   };
   const { staleReplaced } = acquireLock(home.lock);
   if (staleReplaced) log(`replaced a stale lock left by pid ${staleReplaced.pid}`);
-  const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log);
+  const jira = new JiraClient(fetchHttp, keychainJira());
+  const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira);
   controller.recover();
   log(`controller started (home ${root})`);
   let stopped = false;

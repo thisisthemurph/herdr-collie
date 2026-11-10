@@ -64,12 +64,12 @@ export function inProcess(s: Scratch, log: string[] = []) {
 }
 
 /** Sends a command through control/pending and runs one tick; returns the reply. */
-export function command(
+export async function command(
   c: Controller,
   command: Command["command"],
   args: unknown,
   id = newUlid(),
-): CommandReply {
+): Promise<CommandReply> {
   writeJsonAtomic(join(c.home.pending, `${id}.json`), {
     v: 1,
     id,
@@ -77,7 +77,7 @@ export function command(
     at: "2026-11-09T10:00:00Z",
     args,
   });
-  c.processCommands();
+  await c.processCommands();
   return JSON.parse(readFileSync(join(c.home.done, `${id}.json`), "utf8"));
 }
 

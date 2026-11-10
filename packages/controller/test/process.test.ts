@@ -83,7 +83,7 @@ describe("kill -9", () => {
     // A run with three working executions (seeded in-process, then handed to real controllers).
     saveBoard(s.home, BOARD, ["PAY-101", "PAY-102", "PAY-103"]);
     const { c } = inProcess(s);
-    const runId = ok(command(c, "run.start", { board_id: BOARD })).run_id as string;
+    const runId = ok(await command(c, "run.start", { board_id: BOARD })).run_id as string;
     const rl = c.runs.get(runId);
     if (!rl) throw new Error("no run");
     const execs = ["PAY-101", "PAY-102", "PAY-103"].map(
@@ -143,7 +143,7 @@ describe("kill -9", () => {
 });
 
 describe("collie ctl", () => {
-  test("exits 6 at once when no controller is running", () => {
+  test("exits 6 at once when no controller is running", async () => {
     const t0 = Date.now();
     const r = ctl(["run.pause", '{"run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB"}']);
     expect(r.code).toBe(6);
@@ -151,7 +151,7 @@ describe("collie ctl", () => {
     expect(Date.now() - t0).toBeLessThan(2_000);
   });
 
-  test("exits 6 within 10 seconds when the lock's process never answers", () => {
+  test("exits 6 within 10 seconds when the lock's process never answers", async () => {
     // A live pid that isn't a controller: this test process.
     writeFileSync(
       s.home.lock,
@@ -166,7 +166,7 @@ describe("collie ctl", () => {
     expect(took).toBeLessThan(11_500);
   }, 15_000);
 
-  test("validates arguments before sending, naming the field", () => {
+  test("validates arguments before sending, naming the field", async () => {
     const r = ctl(["question.answer", '{"run_id":"01JC8YQ0P4E2W7H5S8D3F6G9KB"}']);
     expect(r.code).toBe(2);
     expect(r.stderr).toContain("args.question_id: is required");

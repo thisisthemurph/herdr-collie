@@ -1,0 +1,637 @@
+{
+  "step": "03-refresh-blocker-todo",
+  "command": "board.refresh",
+  "args": {
+    "board_id": "01M70KK5EZ47PKHN8CH76JYH7G"
+  },
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "url": "https://api.atlassian.com/ex/jira/[CLOUD-ID]/rest/api/3/search/jql",
+        "body": {
+          "jql": "key in (TST-1, TST-2, TST-3, TST-4, TST-5, TST-6) ORDER BY key",
+          "fields": ["summary", "status", "resolution", "issuelinks"],
+          "maxResults": 100
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json;charset=UTF-8"
+        },
+        "body": {
+          "issues": [
+            {
+              "id": "27523",
+              "key": "TST-1",
+              "fields": {
+                "summary": "[Collie test] 1 · Persistence layer",
+                "issuelinks": [
+                  {
+                    "id": "20333",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                      "id": "27524",
+                      "key": "TST-2",
+                      "fields": {
+                        "summary": "[Collie test] 2 · Payments API",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20338",
+                    "type": {
+                      "id": "10003",
+                      "name": "Relates",
+                      "inward": "relates to",
+                      "outward": "relates to"
+                    },
+                    "outwardIssue": {
+                      "id": "27527",
+                      "key": "TST-5",
+                      "fields": {
+                        "summary": "[Collie test] 5 · API docs",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            },
+            {
+              "id": "27524",
+              "key": "TST-2",
+              "fields": {
+                "summary": "[Collie test] 2 · Payments API",
+                "issuelinks": [
+                  {
+                    "id": "20333",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "inwardIssue": {
+                      "id": "27523",
+                      "key": "TST-1",
+                      "fields": {
+                        "summary": "[Collie test] 1 · Persistence layer",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20334",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                      "id": "27526",
+                      "key": "TST-4",
+                      "fields": {
+                        "summary": "[Collie test] 4 · Payment endpoints",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            },
+            {
+              "id": "27525",
+              "key": "TST-3",
+              "fields": {
+                "summary": "[Collie test] 3 · Auth middleware",
+                "issuelinks": [
+                  {
+                    "id": "20335",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                      "id": "27526",
+                      "key": "TST-4",
+                      "fields": {
+                        "summary": "[Collie test] 4 · Payment endpoints",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20336",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "inwardIssue": {
+                      "id": "27528",
+                      "key": "TST-6",
+                      "fields": {
+                        "summary": "[Collie test] X · Outside blocker (not on the board)",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            },
+            {
+              "id": "27526",
+              "key": "TST-4",
+              "fields": {
+                "summary": "[Collie test] 4 · Payment endpoints",
+                "issuelinks": [
+                  {
+                    "id": "20334",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "inwardIssue": {
+                      "id": "27524",
+                      "key": "TST-2",
+                      "fields": {
+                        "summary": "[Collie test] 2 · Payments API",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20335",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "inwardIssue": {
+                      "id": "27525",
+                      "key": "TST-3",
+                      "fields": {
+                        "summary": "[Collie test] 3 · Auth middleware",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20337",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                      "id": "27527",
+                      "key": "TST-5",
+                      "fields": {
+                        "summary": "[Collie test] 5 · API docs",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            },
+            {
+              "id": "27527",
+              "key": "TST-5",
+              "fields": {
+                "summary": "[Collie test] 5 · API docs",
+                "issuelinks": [
+                  {
+                    "id": "20337",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "inwardIssue": {
+                      "id": "27526",
+                      "key": "TST-4",
+                      "fields": {
+                        "summary": "[Collie test] 4 · Payment endpoints",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "id": "20338",
+                    "type": {
+                      "id": "10003",
+                      "name": "Relates",
+                      "inward": "relates to",
+                      "outward": "relates to"
+                    },
+                    "inwardIssue": {
+                      "id": "27523",
+                      "key": "TST-1",
+                      "fields": {
+                        "summary": "[Collie test] 1 · Persistence layer",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            },
+            {
+              "id": "27528",
+              "key": "TST-6",
+              "fields": {
+                "summary": "[Collie test] X · Outside blocker (not on the board)",
+                "issuelinks": [
+                  {
+                    "id": "20336",
+                    "type": {
+                      "id": "10000",
+                      "name": "Blocks",
+                      "inward": "is blocked by",
+                      "outward": "blocks"
+                    },
+                    "outwardIssue": {
+                      "id": "27525",
+                      "key": "TST-3",
+                      "fields": {
+                        "summary": "[Collie test] 3 · Auth middleware",
+                        "status": {
+                          "description": "",
+                          "name": "To Do",
+                          "id": "10000",
+                          "statusCategory": {
+                            "id": 2,
+                            "key": "new",
+                            "colorName": "blue-gray",
+                            "name": "To Do"
+                          }
+                        },
+                        "priority": {
+                          "name": "Medium",
+                          "id": "3"
+                        },
+                        "issuetype": {
+                          "id": "10109",
+                          "description": "A small, distinct piece of work.",
+                          "name": "Task",
+                          "subtask": false,
+                          "avatarId": 10318,
+                          "entityId": "23ba5af2-f549-40f6-af5c-96df15b5a049",
+                          "hierarchyLevel": 0
+                        }
+                      }
+                    }
+                  }
+                ],
+                "resolution": null,
+                "status": {
+                  "description": "",
+                  "name": "To Do",
+                  "id": "10000",
+                  "statusCategory": {
+                    "id": 2,
+                    "key": "new",
+                    "colorName": "blue-gray",
+                    "name": "To Do"
+                  }
+                }
+              }
+            }
+          ],
+          "isLast": true
+        }
+      }
+    }
+  ]
+}

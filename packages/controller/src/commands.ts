@@ -14,6 +14,14 @@ import {
   validateWorkflow,
   type Workflow,
 } from "@collie/schema";
+import {
+  boardImport,
+  boardRefresh,
+  pullIn,
+  readinessEvents,
+  reevaluateRun,
+  requireNoCycle,
+} from "./boards.ts";
 import { CommandError, type Controller, isoSeconds, type Ok } from "./controller.ts";
 import { readJson, writeJsonAtomic } from "./home.ts";
 import { isExecutionFinal, isTicketFinal } from "./machines.ts";
@@ -35,7 +43,7 @@ const unsupported = (what: string, phase: number) =>
 
 type Args<K extends Command["command"]> = Extract<Command, { command: K }>["args"];
 
-export function handleCommand(c: Controller, cmd: Command): Ok {
+export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
   switch (cmd.command) {
     case "board.create":
       return boardCreate(c, cmd.id, cmd.args);
@@ -46,18 +54,21 @@ export function handleCommand(c: Controller, cmd: Command): Ok {
       c.saveBoard(next);
       return {};
     }
-    case "ticket.set_preparation":
-      return editTicket(c, cmd.args.board_id, cmd.args.ticket, (t) => {
+    case "ticket.set_preparation": {
+      const r = editTicket(c, cmd.args.board_id, cmd.args.ticket, (t) => {
         t.preparation = cmd.args.preparation;
       });
+      reevaluateRun(c, cmd.args.board_id, cmd.id);
+      return r;
+    }
     case "ticket.pull_in":
-      return editTicket(c, cmd.args.board_id, cmd.args.ticket, (t) => {
-        if (t.on_board) throw new CommandError("invalid_state", `${cmd.args.ticket} is already on the board`);
-        t.on_board = true;
-      });
+      return pullIn(c, cmd.args.board_id, cmd.args.ticket);
     case "dep.override":
-    case "dep.restore":
-      return depOverride(c, cmd.command === "dep.override", cmd.args);
+    case "dep.restore": {
+      const r = depOverride(c, cmd.command === "dep.override", cmd.args);
+      reevaluateRun(c, cmd.args.board_id, cmd.id);
+      return r;
+    }
     case "profile.save":
       writeJsonAtomic(c.home.profile(cmd.args.id), cmd.args);
       return {};
@@ -139,9 +150,9 @@ export function handleCommand(c: Controller, cmd: Command): Ok {
       return { delivered: false };
     }
     case "board.import":
-      throw unsupported("board.import (needs Jira)", 3);
+      return boardImport(c, cmd.args.board_id, cmd.args);
     case "board.refresh":
-      throw unsupported("board.refresh (needs Jira)", 3);
+      return boardRefresh(c, cmd.args.board_id, cmd.id);
     case "ticket.investigate":
       throw unsupported("ticket.investigate (needs agent execution)", 4);
     case "ticket.retry":
@@ -156,21 +167,16 @@ function checkBoard(board: Board): void {
   if (!r.ok) throw new CommandError("invalid_args", formatIssues(r.issues));
 }
 
-function boardCreate(c: Controller, cmdId: string, a: Args<"board.create">): Ok {
+async function boardCreate(c: Controller, cmdId: string, a: Args<"board.create">): Promise<Ok> {
   // DECISION: the board id is the command id, so a command re-run after a crash is a no-op.
   if (existsSync(c.home.board(cmdId))) return { board_id: cmdId };
-  if (!a.jira.cloud_id) {
-    // DECISION: looking up cloud_id from the site needs Jira (Phase 3); until then, pass it.
-    throw new CommandError(
-      "unsupported",
-      "jira.cloud_id is required until Jira arrives in Phase 3 (it will be looked up from the site)",
-    );
-  }
+  // The cloud id is looked up once, here, and cached on the board (protocol, "Board").
+  const cloudId = a.jira.cloud_id ?? (await c.requireJira().cloudId(a.jira.site));
   const board: Board = {
     v: 1,
     id: cmdId,
     name: a.name,
-    jira: { site: a.jira.site, cloud_id: a.jira.cloud_id, project: a.jira.project },
+    jira: { site: a.jira.site, cloud_id: cloudId, project: a.jira.project },
     repo: a.repo,
     settings: { ...DEFAULT_SETTINGS, ...a.settings } as BoardSettings,
     tickets: {},
@@ -250,6 +256,7 @@ function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
     .map(([k]) => k)
     .sort();
   if (keys.length === 0) throw new CommandError("invalid_state", `board ${board.id} has no tickets to run`);
+  requireNoCycle(board);
   const held = c.leases();
   const conflicts = keys.filter((k) => held.has(k));
   if (conflicts.length) {
@@ -334,7 +341,7 @@ function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
           : {
               from: null,
               to: "pending",
-              reason: "leased at run start; readiness is computed from Phase 3 on",
+              reason: "leased at run start",
             },
         { ticket: k, cause: cmdId },
       ),
@@ -344,6 +351,7 @@ function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
   const rl = RunLog.create(c.home, run, first, now);
   c.runs.set(rl.id, rl);
   c.saveLeases();
+  c.emit(rl, readinessEvents(c, rl, board, cmdId));
   c.completeRunIfDone(rl, cmdId);
   return { run_id: rl.id };
 }

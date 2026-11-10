@@ -182,12 +182,12 @@ You can build a board from real Jira tickets in Herdr and see its correct depend
 
 **Done when**
 
-- [ ] Importing five tickets with known links produces the expected graph.
-- [ ] Layout unit tests place every fixture board with no overlapping nodes and no edge crossing a node.
-- [ ] A cycle is reported and blocks Start run.
-- [ ] A blocker outside the board shows Pull in and Override, and both work.
-- [ ] Readiness changes when a blocker's Jira status changes and you refresh.
-- [ ] Reloading the mod shows the same board without data loss.
+- [x] Importing five tickets with known links produces the expected graph.
+- [x] Layout unit tests place every fixture board with no overlapping nodes and no edge crossing a node.
+- [x] A cycle is reported and blocks Start run.
+- [x] A blocker outside the board shows Pull in and Override, and both work.
+- [x] Readiness changes when a blocker's Jira status changes and you refresh.
+- [x] Reloading the mod shows the same board without data loss.
 
 ## Phase 4 — Agent execution
 

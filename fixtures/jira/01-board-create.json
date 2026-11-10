@@ -1,0 +1,35 @@
+{
+  "step": "01-board-create",
+  "command": "board.create",
+  "args": {
+    "name": "Collie test board",
+    "jira": {
+      "site": "[SITE].atlassian.net",
+      "project": "TST"
+    },
+    "repo": {
+      "workspace": "[WORKSPACE]",
+      "slug": "[REPO]",
+      "default_branch": "main",
+      "local_path": "~/code/[REPO]"
+    }
+  },
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://[SITE].atlassian.net/_edge/tenant_info",
+        "body": null
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "cloudId": "[CLOUD-ID]"
+        }
+      }
+    }
+  ]
+}
