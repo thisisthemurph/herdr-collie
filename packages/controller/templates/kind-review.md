@@ -1,0 +1,1 @@
+Review this branch's changes against `{{base}}` (`git diff {{base}}...HEAD`) for your area. Don't modify files. Report each issue with `collie finding`, marking it `--blocking` only if it must be fixed before merge. On round 2 and later: check that the listed findings were addressed, and review only code changed since the last round.

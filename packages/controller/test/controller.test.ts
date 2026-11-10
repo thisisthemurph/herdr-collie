@@ -200,12 +200,16 @@ describe("run lifecycle", () => {
 
   test("commands that need later phases say which phase", async () => {
     const runId = await startRun();
-    expect(await command(c, "ticket.retry", { run_id: runId, ticket: "PAY-101" })).toMatchObject({
+    expect(await command(c, "pr.mark_ready", { run_id: runId, ticket: "PAY-101" })).toMatchObject({
       ok: false,
       error: {
         code: "unsupported",
-        message: "ticket.retry (needs agent execution) is not supported yet; it arrives in Phase 4",
+        message: "pr.mark_ready (needs Bitbucket) is not supported yet; it arrives in Phase 6",
       },
+    });
+    expect(await command(c, "ticket.investigate", { board_id: BOARD, tickets: ["PAY-101"] })).toMatchObject({
+      ok: false,
+      error: { code: "unsupported", message: expect.stringContaining("Phase 5") },
     });
     expect(await command(c, "board.import", { board_id: BOARD, jql: "project = PAY" })).toMatchObject({
       ok: false,
@@ -214,7 +218,7 @@ describe("run lifecycle", () => {
     // A rejected command is logged in its run.
     expect(readEvents(s.home, runId).at(-1)).toMatchObject({
       type: "command.rejected",
-      payload: { command: "ticket.retry", code: "unsupported" },
+      payload: { command: "pr.mark_ready", code: "unsupported" },
     });
   });
 

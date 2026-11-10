@@ -25,6 +25,8 @@ export class RunLog {
   readonly ids = new Set<string>();
   /** execution id -> role, from execution.created. */
   readonly roles = new Map<string, string>();
+  /** ticket -> when it last became `ready` (ms), for "longest waiting" in the scheduler. */
+  readonly readyAt = new Map<string, number>();
   /** Command ids already logged as command.applied or command.rejected. */
   readonly commandIds = new Set<string>();
   /** When and why the run ended, from run.completed or run.cancelled. */
@@ -96,6 +98,10 @@ export class RunLog {
   private track(ev: AnyEvent) {
     this.ids.add(ev.id);
     if (ev.type === "execution.created" && ev.execution_id) this.roles.set(ev.execution_id, ev.payload.role);
+    if (ev.type === "ticket.state_changed" && ev.ticket) {
+      if ((ev.payload as { to?: string }).to === "ready") this.readyAt.set(ev.ticket, Date.parse(ev.ts));
+      else this.readyAt.delete(ev.ticket);
+    }
     if ((ev.type === "command.applied" || ev.type === "command.rejected") && ev.caused_by)
       this.commandIds.add(ev.caused_by);
     if (ev.type === "run.completed" || ev.type === "run.cancelled") {

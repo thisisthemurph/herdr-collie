@@ -214,6 +214,8 @@ hc run --bg --json --no-parent --no-notify --name <exec-slug> --cwd <worktree> \
 - `--no-parent`: the controller runs in an hc terminal itself, and a child started from it dies with it by default. Agents must outlive a controller restart.
 - `--no-notify`: otherwise hc types notes about the child into the controller's own terminal.
 - Never put a secret in this command line or its environment: the environment is readable by the same user (`ps -E`).
+- A terminal is named `<ticket>-<last six characters of the execution id>`, lower case, within hc's 32 characters.
+- **Trust dialog (found against real Claude Code).** A new worktree makes Claude Code ask whether to trust the folder. hc reports the agent `idle`, not `blocked`, so the controller reads the screen (`hc read --lines 0`) once the agent has been at turn 0 for 10 seconds; if it shows the dialog, it logs `execution.agent_blocked` (`permission`) and does not start the 60-second timeout. Collie doesn't answer the dialog: the person does, in the agent's terminal.
 - The execution moves to `working` only once `hc get` shows `turn >= 1` or `working`. An agent still at `idle`, turn 0, 60 seconds after launch means its first message never arrived: fail the execution as `tooling`, retryable.
 
 **Talking to an agent**
@@ -539,7 +541,7 @@ A successful reply is `{"v": 1, "id": …, "ok": true, "result": {…}}`.
 | `run.start` | `board_id`, optional `carry_over_from` | `run_id` |
 | `run.pause` / `run.resume` / `run.cancel` | `run_id`, optional `reason` | — |
 | `run.delete` | `run_id` | — |
-| `ticket.cancel` / `ticket.retry` | `run_id`, `ticket` | `execution_id` for retry |
+| `ticket.cancel` / `ticket.retry` | `run_id`, `ticket` | `execution_id` for retry. Retry applies to a ticket held for `execution_failed`: it clears that and starts a developer at attempt 1 |
 | `exec.cancel` | `run_id`, `execution_id` | — |
 | `question.answer` | `run_id`, `question_id`, `answer`, `share_with_ticket` | — |
 | `pr.mark_ready` | `run_id`, `ticket` | — |
@@ -621,6 +623,14 @@ Once a ticket leaves `ready`, blocker regressions are logged as warnings but don
 - A `done` that fails controller verification (no commits, or a reviewer verdict that contradicts its findings) is rejected; the execution stays `working`, and the controller tells the agent why with `hc send`.
 - On `failed` with attempts left and a retryable cause, the controller immediately creates a new execution with `attempt` + 1 in the same worktree. Otherwise the ticket gets `execution_failed` in `attention`.
 - `fail` with `retryable: false` never retries automatically.
+
+## Phase 4 rules the controller applies
+
+- **Workflow is developer-only** until Phase 5: reviewers in a snapshot are ignored, and a ticket whose developer is `done` goes `in_progress → delivering → completed` at once. Delivery (push, PR, Jira) is Phase 6.
+- **Branch and base.** The branch is the lower-cased key plus a slug of the summary (`pay-102-payment-api`), in `~/.herdr/worktrees/<repo>/<branch>`. A ticket whose blockers completed in the same run is based on the first one's branch, and merges the others in; otherwise on the board's default branch (a local branch; nothing is fetched).
+- **Done verification.** Besides the listed commits, the controller checks they are on the ticket branch, that the branch has commits beyond `base`, and that the worktree is clean. A rejected `done` is explained to the agent with `hc send` at its next turn end.
+- **Terminals.** Cancelled executions are killed at once; a timed-out or never-started one is killed; a finished ticket's executions are killed when it completes. Each kill is logged as `execution.killed` while the run is live, and in `controller.log` after it has ended.
+- **Dispatch limits** are the board's `max_tickets` (tickets in flight) and `max_agents` (live agents), per run.
 
 ## Retention
 

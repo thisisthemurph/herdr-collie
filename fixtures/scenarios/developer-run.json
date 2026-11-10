@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "steps": [
+    { "collie": ["show", "task"], "expect_output": "You are the Developer" },
+    { "collie": ["status", "Working on it", "--phase", "implementing"] },
+    {
+      "shell": "printf 'work for %s\\n' \"$COLLIE_TICKET\" > \"$COLLIE_TICKET.txt\" && git add -A && git commit -q -m \"$COLLIE_TICKET: work\""
+    },
+    { "collie": ["done", "--summary", "Implemented ${COLLIE_TICKET}"] }
+  ]
+}

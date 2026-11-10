@@ -30,7 +30,12 @@ afterEach(() => {
 });
 
 function startController(): Subprocess {
-  const p = spawn([CONTROLLER_BIN, "--home", s.root], { stdout: "pipe", stderr: "pipe" });
+  const p = spawn([CONTROLLER_BIN, "--home", s.root], {
+    stdout: "pipe",
+    stderr: "pipe",
+    // These tests seed executions by hand: the controller must not look for them in a real Herdr.
+    env: { ...process.env, COLLIE_NO_AGENTS: "1" },
+  });
   procs.push(p);
   return p;
 }

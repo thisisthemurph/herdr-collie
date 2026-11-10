@@ -11,7 +11,7 @@ import {
   readiness,
   satisfiesPolicy,
 } from "@collie/board";
-import type { Board, BoardTicket } from "@collie/schema";
+import type { Board, BoardTicket, ExecutionState, RunState, StateFile, TicketState } from "@collie/schema";
 
 export const PREPARATIONS: BoardTicket["preparation"][] = [
   "unreviewed",
@@ -176,4 +176,183 @@ export function describeReply(
     default:
       return "Done.";
   }
+}
+
+// --- runs (Phase 4): what the Delivery graph and the inspector show of a run in progress
+
+/** A run as the mod reads it: run.json's header and state.json. */
+export type RunView = { id: string; number: number; status: RunState; boardId: string; state: StateFile };
+
+/** How a ticket's run state is drawn: a theme color name. */
+export type Tone = "working" | "blocked" | "done" | "idle" | "muted" | "dim";
+
+const TICKET_LABEL: Record<TicketState, [string, Tone]> = {
+  pending: ["Not prepared", "dim"],
+  blocked: ["Blocked", "muted"],
+  ready: ["Queued", "idle"],
+  in_progress: ["Developing", "working"],
+  reviewing: ["Reviewing", "working"],
+  remediating: ["Remediating", "working"],
+  delivering: ["Delivering", "working"],
+  needs_input: ["Needs you", "blocked"],
+  completed: ["Done", "done"],
+  cancelled: ["Cancelled", "dim"],
+};
+
+export const ticketLabel = (s: TicketState) => TICKET_LABEL[s][0];
+export const ticketTone = (s: TicketState): Tone => TICKET_LABEL[s][1];
+
+const EXEC_LIVE: ExecutionState[] = ["created", "starting", "working", "needs_input"];
+
+export type ExecView = {
+  id: string;
+  attempt: number;
+  kind: string;
+  state: ExecutionState;
+  live: boolean;
+  terminal: string | null;
+  nudges: number;
+  /** "waiting for permission", set while hc reports the agent blocked. */
+  blocked: string | null;
+  /** Its summary when done, or why it failed. */
+  outcome: string | null;
+};
+
+export type TicketRunView = {
+  key: string;
+  state: TicketState;
+  label: string;
+  tone: Tone;
+  branch: string | null;
+  executions: ExecView[];
+  /** Why the ticket waits for a person, in words. */
+  attention: string[];
+};
+
+export type RunModel = {
+  id: string;
+  number: number;
+  status: RunState;
+  active: boolean;
+  tickets: Record<string, TicketRunView>;
+  /** "2 of 5 done" */
+  progress: string;
+  /** Run-level buttons: Pause or Resume, and Cancel. */
+  actions: Action[];
+};
+
+function execView(id: string, e: StateFile["executions"][string]): ExecView {
+  const r = e.result as { summary?: string; reason?: string } | null;
+  const blocked = e.agent_blocked
+    ? `waiting for ${e.agent_blocked.kind === "question" ? "an answer in its terminal" : "permission"}${e.agent_blocked.message ? `: ${e.agent_blocked.message}` : ""}`
+    : null;
+  return {
+    id,
+    attempt: e.attempt,
+    kind: e.kind,
+    state: e.state,
+    live: EXEC_LIVE.includes(e.state),
+    terminal: e.terminal,
+    nudges: e.nudges,
+    blocked,
+    outcome: r?.summary ?? r?.reason ?? null,
+  };
+}
+
+const ATTENTION_TEXT: Record<string, string> = {
+  question: "an agent asked a question",
+  round_cap: "reviews found issues again at the last allowed round",
+  execution_failed: "its agent failed with no attempts left",
+  delivery_error: "pushing or opening the pull request failed",
+};
+
+export function runModel(run: RunView | null): RunModel | null {
+  if (!run) return null;
+  const st = run.state;
+  const tickets: Record<string, TicketRunView> = {};
+  for (const [key, t] of Object.entries(st.tickets)) {
+    tickets[key] = {
+      key,
+      state: t.state,
+      label: ticketLabel(t.state),
+      tone: ticketTone(t.state),
+      branch: t.branch,
+      executions: t.executions.flatMap((id) => (st.executions[id] ? [execView(id, st.executions[id])] : [])),
+      attention: t.attention.map((a) => ATTENTION_TEXT[a.kind] ?? a.kind),
+    };
+  }
+  const all = Object.values(tickets);
+  const done = all.filter((t) => t.state === "completed").length;
+  const active = run.status === "running" || run.status === "paused";
+  const actions: Action[] = [];
+  if (run.status === "running")
+    actions.push({ id: "run-pause", label: "Pause run", command: "run.pause", args: { run_id: run.id } });
+  if (run.status === "paused")
+    actions.push({ id: "run-resume", label: "Resume run", command: "run.resume", args: { run_id: run.id } });
+  if (active)
+    actions.push({ id: "run-cancel", label: "Cancel run", command: "run.cancel", args: { run_id: run.id } });
+  return {
+    id: run.id,
+    number: run.number,
+    status: run.status,
+    active,
+    tickets,
+    progress: `${done} of ${all.length} done`,
+    actions,
+  };
+}
+
+/** Start run, or why it can't start. The board's own problems come first (a cycle, nothing imported). */
+export function startAction(
+  boardId: string,
+  m: Pick<BoardModel, "startBlocked">,
+  run: RunModel | null,
+): { action: Action; disabled: string | null } {
+  const action: Action = {
+    id: "start-run",
+    label: "Start run",
+    command: "run.start",
+    args: { board_id: boardId },
+  };
+  if (run?.active) return { action, disabled: `Run ${run.number} is ${run.status}.` };
+  return { action, disabled: m.startBlocked };
+}
+
+/** What a person can do to one ticket of a run. */
+export function ticketRunActions(runId: string, t: TicketRunView): Action[] {
+  const out: Action[] = [];
+  if (t.state === "needs_input" && t.attention.includes(ATTENTION_TEXT.execution_failed as string))
+    out.push({
+      id: `retry-${t.key}`,
+      label: "Retry with a new agent",
+      command: "ticket.retry",
+      args: { run_id: runId, ticket: t.key },
+    });
+  for (const e of t.executions.filter((x) => x.live))
+    out.push({
+      id: `cancel-exec-${e.id}`,
+      label: `Stop agent (attempt ${e.attempt})`,
+      command: "exec.cancel",
+      args: { run_id: runId, execution_id: e.id },
+    });
+  if (t.state !== "completed" && t.state !== "cancelled")
+    out.push({
+      id: `cancel-${t.key}`,
+      label: "Cancel ticket",
+      command: "ticket.cancel",
+      args: { run_id: runId, ticket: t.key },
+    });
+  return out;
+}
+
+/** The Herdr command that shows an agent's live terminal over the current tab. */
+export const watchCommand = (terminal: string) => ({ name: "terminal.peek", args: { terminal } });
+
+/** One short line for an execution in a list. */
+export function execLine(e: ExecView): string {
+  const bits = [`attempt ${e.attempt}`, e.state.replaceAll("_", " ")];
+  if (e.terminal) bits.push(e.terminal);
+  if (e.nudges) bits.push(`nudged ${e.nudges}×`);
+  if (e.blocked) bits.push(e.blocked);
+  return bits.join(" · ");
 }

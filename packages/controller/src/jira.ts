@@ -3,6 +3,7 @@
 // Basic email:token: a scoped token is rejected on the site URL. The cloud id comes from the
 // site's unauthenticated /_edge/tenant_info.
 import { type JiraIssue, SEARCH_FIELDS } from "@collie/board";
+import { adfToText, splitDescription } from "./adf.ts";
 import { CommandError } from "./controller.ts";
 import type { CredentialSource } from "./credentials.ts";
 
@@ -35,7 +36,19 @@ const PAGE = 100;
 /** Keys per `key in (...)` search, to keep the JQL short. */
 const KEYS_PER_SEARCH = 50;
 
-export class JiraClient {
+/** How many of the newest comments go into an agent's brief. */
+const COMMENTS = 10;
+
+export type TicketBrief = {
+  description: string;
+  criteria: string;
+  comments: { author: string; created: string; text: string }[];
+};
+
+/** What the launcher needs from Jira; JiraClient is the real one. */
+export type BriefSource = { brief(cloudId: string, key: string): Promise<TicketBrief> };
+
+export class JiraClient implements BriefSource {
   constructor(
     private readonly http: Http,
     private readonly creds: CredentialSource,
@@ -89,6 +102,30 @@ export class JiraClient {
       out.push(...(await this.search(cloudId, `key in (${chunk.join(", ")}) ORDER BY key`)));
     }
     return out;
+  }
+
+  /** The ticket's description, acceptance criteria and newest comments, as text for an agent. */
+  async brief(cloudId: string, key: string): Promise<TicketBrief> {
+    const issue = (await this.authed(
+      cloudId,
+      "GET",
+      `/issue/${encodeURIComponent(key)}?fields=description,comment`,
+    )) as {
+      fields?: {
+        description?: unknown;
+        comment?: { comments?: { author?: { displayName?: string }; created?: string; body?: unknown }[] };
+      };
+    };
+    const { description, criteria } = splitDescription(issue.fields?.description);
+    const comments = (issue.fields?.comment?.comments ?? [])
+      .slice(-COMMENTS)
+      .reverse()
+      .map((c) => ({
+        author: c.author?.displayName ?? "someone",
+        created: (c.created ?? "").slice(0, 10),
+        text: adfToText(c.body),
+      }));
+    return { description, criteria, comments };
   }
 
   private async authed(

@@ -67,6 +67,12 @@ export class Home {
   execDir(runId: string, execId: string) {
     return join(this.runDir(runId), "executions", execId);
   }
+  executionFile(runId: string, execId: string) {
+    return join(this.execDir(runId, execId), "execution.json");
+  }
+  taskFile(runId: string, execId: string) {
+    return join(this.execDir(runId, execId), "task.md");
+  }
   inbox(runId: string, execId: string) {
     return join(this.execDir(runId, execId), "inbox.jsonl");
   }
@@ -92,6 +98,20 @@ export function writeJsonAtomic(path: string, value: unknown): void {
   const fd = openSync(tmp, "w");
   try {
     writeSync(fd, `${JSON.stringify(value, null, 2)}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, path);
+}
+
+/** Writes text atomically (temp file, then rename), like writeJsonAtomic. */
+export function writeTextAtomic(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.tmp`;
+  const fd = openSync(tmp, "w");
+  try {
+    writeSync(fd, text);
     fsyncSync(fd);
   } finally {
     closeSync(fd);

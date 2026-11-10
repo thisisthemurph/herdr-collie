@@ -133,6 +133,7 @@ const outcome = withLock(() => {
   return result;
 });
 
+if (outcome.text !== undefined) process.stdout.write(outcome.text);
 if (outcome.stdout !== undefined) process.stdout.write(`${JSON.stringify(outcome.stdout)}\n`);
 if (outcome.stderr !== undefined) process.stderr.write(`${JSON.stringify(outcome.stderr)}\n`);
 process.exit(outcome.code);

@@ -6,8 +6,10 @@
 // state.json and release the lock; kill -9 is survived by recovery on the next start.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { newUlid } from "@collie/schema";
+import { defaultAdapters } from "./adapters/index.ts";
 import { Controller } from "./controller.ts";
 import { keychainJira } from "./credentials.ts";
+import { Hc, spawnHc } from "./hc.ts";
 import { defaultHome, Home } from "./home.ts";
 import { fetchHttp, JiraClient } from "./jira.ts";
 import { acquireLock, LockHeldError, releaseLock } from "./lock.ts";
@@ -38,9 +40,15 @@ export function start(root: string): { controller: Controller; stop: () => void 
   const { staleReplaced } = acquireLock(home.lock);
   if (staleReplaced) log(`replaced a stale lock left by pid ${staleReplaced.pid}`);
   const jira = new JiraClient(fetchHttp, keychainJira());
-  const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira);
+  // COLLIE_NO_AGENTS=1 runs a controller that never starts or watches agents (tests that must
+  // not reach a real Herdr). COLLIE_HC names the hc program (default: `hc` on PATH).
+  const agents = process.env.COLLIE_NO_AGENTS
+    ? null
+    : { hc: new Hc(spawnHc(process.env.COLLIE_HC ?? "hc")), adapters: defaultAdapters(), briefs: jira };
+  const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira, agents);
   controller.recover();
   log(`controller started (home ${root})`);
+  controller.reconcile().catch((e) => log(`reconcile failed: ${(e as Error).stack ?? e}`));
   let stopped = false;
   const timer = setInterval(() => {
     try {

@@ -216,11 +216,11 @@ The first end-to-end milestone: a run dispatches a real developer agent per read
 
 **Done when**
 
-- [ ] With fake `hc`: a three-ticket run with one dependency completes, and the blocked ticket starts only after its blocker is done.
-- [ ] With real Herdr and Claude Code: one ticket in a scratch repo reaches developer done with a commit on its branch.
-- [ ] An agent that goes idle without reporting is nudged twice, then failed as retryable.
-- [ ] Restarting the controller mid-run reattaches to the running agent without starting a duplicate. The agent's terminal survives the controller's terminal being killed.
-- [ ] Reloading the mod mid-run loses nothing.
+- [x] With fake `hc`: a three-ticket run with one dependency completes, and the blocked ticket starts only after its blocker is done.
+- [x] With real Herdr and Claude Code: one ticket in a scratch repo reaches developer done with a commit on its branch.
+- [x] An agent that goes idle without reporting is nudged twice, then failed as retryable.
+- [x] Restarting the controller mid-run reattaches to the running agent without starting a duplicate. The agent's terminal survives the controller's terminal being killed.
+- [x] Reloading the mod mid-run loses nothing.
 
 ## Phase 5 — Workflow: reviews, remediation, questions
 
