@@ -353,3 +353,24 @@ describe("the hc wrapper", () => {
     await expect(hc.get("t1")).rejects.toMatchObject({ kind: "unavailable" });
   });
 });
+
+describe("codex adapter", () => {
+  const codex = (resolve: (n: string) => string | null) => {
+    const a = defaultAdapters(resolve).codex;
+    if (!a) throw new Error("no adapter");
+    return a;
+  };
+  const cp = { ...profile, harness: "codex", model: "gpt-5-codex", args: ["--full-auto"] };
+
+  test("the instructions go in front of the first message, which comes before every option", () => {
+    const l = codex((n) => `/opt/bin/${n}`).launch({ profile: cp, systemPrompt: "SYS", firstMessage: "go" });
+    expect(l.argv).toEqual(["/opt/bin/codex", "SYS\n\ngo", "--model", "gpt-5-codex", "--full-auto"]);
+    expect(l.env).toEqual({});
+  });
+
+  test("a machine without codex gets a message that says what to do", () => {
+    expect(() => codex(() => null).launch({ profile: cp, systemPrompt: "S", firstMessage: "g" })).toThrow(
+      /COLLIE_CODEX/,
+    );
+  });
+});

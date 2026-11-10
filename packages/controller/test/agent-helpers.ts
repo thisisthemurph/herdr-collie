@@ -16,7 +16,7 @@ import { type Adapters, defaultAdapters } from "../src/adapters/index.ts";
 import { Controller } from "../src/controller.ts";
 import type { DeliveryOptions } from "../src/delivery.ts";
 import { Hc, spawnHc } from "../src/hc.ts";
-import type { BriefSource } from "../src/jira.ts";
+import type { BriefSource, JiraClient } from "../src/jira.ts";
 import type { RunLog } from "../src/runlog.ts";
 import {
   agentLine,
@@ -98,6 +98,8 @@ export function harness(
     agents?: Agent[];
     adapters?: Adapters;
     briefs?: BriefSource | null;
+    /** A Jira client for board commands (import, refresh, pull-in), e.g. one playing recorded HTTP. */
+    jira?: JiraClient | null;
     hcEnv?: Record<string, string>;
     options?: Record<string, unknown>;
     profile?: Record<string, unknown>;
@@ -157,7 +159,7 @@ export function harness(
       s.home,
       clock,
       (m) => log.push(m),
-      null,
+      opts.jira ?? null,
       {
         hc,
         adapters: opts.adapters ?? defaultAdapters(() => "/usr/local/bin/claude"),

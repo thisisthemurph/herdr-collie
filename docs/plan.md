@@ -295,9 +295,9 @@ The MVP is complete when the MVP acceptance scenario below passes as an automate
 
 **Done when**
 
-- [ ] The end-to-end scenario passes in CI.
+- [x] The end-to-end scenario passes in CI.
 - [ ] A manual run on a real Jira board with five tickets reaches PRs, with every step checked off the manual list.
-- [ ] The retention rules from the protocol doc are implemented: the daily prune pass, worktree removal that never loses unpushed work, terminal cleanup, and `run.delete`.
+- [x] The retention rules from the protocol doc are implemented: the daily prune pass, worktree removal that never loses unpushed work, terminal cleanup, and `run.delete`.
 
 ## MVP acceptance scenario
 

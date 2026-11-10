@@ -52,6 +52,8 @@ export function start(root: string): { controller: Controller; stop: () => void 
   const delivery = agents
     ? { host: new BitbucketCloud(fetchHttp, keychainBitbucket()), remote: new GitRemote(), jira }
     : null;
+  // The prune pass (Phase 7) runs with delivery: it asks the same remote what has been pushed.
+  const retention = agents && delivery ? { remote: delivery.remote, hc: agents.hc } : null;
   const controller = new Controller(
     home,
     { now: () => Date.now(), id: () => newUlid() },
@@ -59,6 +61,7 @@ export function start(root: string): { controller: Controller; stop: () => void 
     jira,
     agents,
     delivery,
+    retention,
   );
   controller.recover();
   const seeded = seedDefaults(home);

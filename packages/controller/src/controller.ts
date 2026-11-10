@@ -28,6 +28,7 @@ import {
   isTicketFinal,
   TICKET_TRANSITIONS,
 } from "./machines.ts";
+import { Retention, type RetentionOptions } from "./retention.ts";
 import { type Logger, RunLog } from "./runlog.ts";
 
 export class CommandError extends Error {
@@ -51,6 +52,8 @@ export class Controller {
   readonly tracked = new Map<string, RunLog>();
   /** Delivery to the code host (Phase 6). Null without one: tickets complete as they pass the gate. */
   readonly delivery: Delivery | null;
+  /** The prune pass (Phase 7). Null without a remote to check worktrees against. */
+  readonly retention: Retention | null;
   /** The command being handled, so a run it ends can log it before ending. */
   private currentCommand: { id: string; command: string } | null = null;
 
@@ -64,9 +67,11 @@ export class Controller {
     private readonly jira: JiraClient | null = null,
     agentOptions: AgentOptions | null = null,
     deliveryOptions: DeliveryOptions | null = null,
+    retentionOptions: RetentionOptions | null = null,
   ) {
     this.agents = agentOptions ? new Agents(this, agentOptions) : null;
     this.delivery = deliveryOptions ? new Delivery(this, deliveryOptions) : null;
+    this.retention = retentionOptions ? new Retention(this, retentionOptions) : null;
   }
 
   /** Every log with executions to watch: the live runs, then the boards' preparation logs. */
@@ -190,6 +195,7 @@ export class Controller {
       if (!rl.prep) this.delivery?.tick(rl);
       rl.maybeFlush(this.clock.now());
     }
+    this.retention?.tick();
     for (const [id, rl] of this.tracked) {
       this.delivery?.tick(rl);
       rl.maybeFlush(this.clock.now());

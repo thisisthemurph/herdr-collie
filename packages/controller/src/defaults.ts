@@ -43,6 +43,21 @@ export const DEFAULT_PROFILES: Profile[] = [
     permissions: { write_worktree: true, shell: true, network: false },
     timeout_min: 60,
   },
+  {
+    // The second harness (Phase 7): the same job as `developer`, run by Codex. Its model is a
+    // placeholder to set in the profile editor; permissions are Codex's own, so no Claude flags.
+    ...base,
+    id: "developer-codex",
+    name: "Developer (Codex)",
+    role: "developer",
+    harness: "codex",
+    model: "gpt-5-codex",
+    args: [],
+    instructions:
+      "You are a careful senior software engineer. Match the style of the code around you, keep the change small and focused on the ticket, and add or update tests. Commit your work on the ticket branch before you report it done.",
+    permissions: { write_worktree: true, shell: true, network: false },
+    timeout_min: 60,
+  },
   reviewer(
     "security-reviewer",
     "Security reviewer",
