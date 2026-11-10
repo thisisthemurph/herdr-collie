@@ -86,3 +86,13 @@ make install
 # and the ticket shows Needs rebase. Mark ready on a draft from the Pull requests panel.
 # Fake-host tests: bun test packages/controller/test/delivery.test.ts packages/controller/test/bitbucket.test.ts
 ```
+
+## CI races found after the first push
+
+`make check` passed locally but failed on CI three times, all from races between background delivery work and state changes:
+
+- A conflict check that began before a retarget could clear `needs_rebase` right after the retarget set it. The check read the PR from live state that the reducer mutates in place; it now keeps the destination it started with.
+- A PR poll in flight during a retarget could write the old destination back. It now drops the destination when the PR changed while the request ran.
+- `h.calls()` could parse a half-written `fake-hc` line (a Phase 4 test flaked). It now skips a partial last line.
+
+Lesson for later phases: never hold a reference to `rl.state` objects across an `await`; copy the fields the work is about. Run `make check` several times before pushing anything with timing in it.
