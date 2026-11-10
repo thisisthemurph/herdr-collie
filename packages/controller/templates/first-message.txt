@@ -1,0 +1,1 @@
+Your Collie brief is ready. Run `collie show task` and follow it.

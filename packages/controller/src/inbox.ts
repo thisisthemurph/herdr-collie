@@ -26,8 +26,22 @@ function readFrom(path: string, offset: number): Buffer | null {
   }
 }
 
+/** What the controller adds to judging an inbox line (the checks that need a worktree). */
+export type InboxHooks = {
+  /** Checks a developer's `done` against the ticket's worktree. Returns the reason to reject it. */
+  verifyDeveloper?: (execId: string, commits: string[]) => string | null;
+  /** Called when a `done` is rejected by controller verification, so the agent can be told why. */
+  rejectedDone?: (execId: string, reason: string) => void;
+};
+
 /** Processes the new complete lines of one execution's inbox. Returns how many it judged. */
-export function processInbox(rl: RunLog, execId: string, home: Home, clock: Clock): number {
+export function processInbox(
+  rl: RunLog,
+  execId: string,
+  home: Home,
+  clock: Clock,
+  hooks: InboxHooks = {},
+): number {
   const start = rl.state.inbox_offsets[execId] ?? 0;
   const buf = readFrom(home.inbox(rl.id, execId), start);
   if (!buf) return 0;
@@ -38,14 +52,21 @@ export function processInbox(rl: RunLog, execId: string, home: Home, clock: Cloc
     if (nl === -1) break; // an incomplete final line: wait for the rest (inbox rule 4)
     const line = buf.subarray(pos, nl + 1).toString("utf8");
     pos = nl + 1;
-    rl.emit(judge(rl, execId, line, start + pos, clock), clock.now());
+    rl.emit(judge(rl, execId, line, start + pos, clock, hooks), clock.now());
     judged += 1;
   }
   return judged;
 }
 
 /** The events for one inbox line. */
-export function judge(rl: RunLog, execId: string, line: string, offset: number, clock: Clock): AnyEvent[] {
+export function judge(
+  rl: RunLog,
+  execId: string,
+  line: string,
+  offset: number,
+  clock: Clock,
+  hooks: InboxHooks = {},
+): AnyEvent[] {
   const exec = rl.state.executions[execId];
   const ticket = exec?.ticket ?? null;
   const ev = (type: string, payload: Record<string, unknown>, cause: string | null = null) =>
@@ -83,8 +104,11 @@ export function judge(rl: RunLog, execId: string, line: string, offset: number, 
 
   const role = rl.roles.get(execId);
   if (a.type === "done") {
-    const why = verifyDone(rl, execId, role, a);
-    if (why) return reject(why, a.id, a.type);
+    const why = verifyDone(rl, execId, role, a, hooks);
+    if (why) {
+      hooks.rejectedDone?.(execId, why);
+      return reject(why, a.id, a.type);
+    }
   }
 
   const out: AnyEvent[] = [];
@@ -150,7 +174,13 @@ export function judge(rl: RunLog, execId: string, line: string, offset: number, 
 }
 
 /** Controller-side verification of a `done` (protocol, "Agent events": role rules). */
-function verifyDone(rl: RunLog, execId: string, role: string | undefined, a: AgentEvent): string | null {
+function verifyDone(
+  rl: RunLog,
+  execId: string,
+  role: string | undefined,
+  a: AgentEvent,
+  hooks: InboxHooks,
+): string | null {
   if (a.type !== "done") return null;
   const blocking = rl.state.findings.filter((f) => f.execution_id === execId && f.blocking).length;
   if (role === "reviewer") {
@@ -160,10 +190,11 @@ function verifyDone(rl: RunLog, execId: string, role: string | undefined, a: Age
     if (a.payload.verdict === "approve" && blocking > 0)
       return `approve isn't allowed with ${blocking} blocking finding(s) recorded`;
   }
-  if (role === "developer" && !a.payload.commits?.length) {
-    // DECISION: Phase 2 checks the done lists commits; checking them against the ticket
-    // branch needs the worktree and arrives with agent execution (Phase 4).
-    return "a developer's done needs at least one commit on the ticket branch";
+  if (role === "developer") {
+    if (!a.payload.commits?.length)
+      return "a developer's done needs at least one commit on the ticket branch";
+    // Phase 4: the commits are checked against the worktree by the controller (see git.ts).
+    return hooks.verifyDeveloper?.(execId, a.payload.commits) ?? null;
   }
   return null;
 }

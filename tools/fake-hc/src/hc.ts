@@ -39,7 +39,14 @@ export type Effect =
   | { kind: "kill"; address: string; pid: number }
   | { kind: "deliver"; address: string; text: string };
 
-export type Outcome = { code: number; stdout?: unknown; stderr?: unknown; effects: Effect[] };
+export type Outcome = {
+  code: number;
+  stdout?: unknown;
+  /** Printed as is, not as JSON (hc read prints text). */
+  text?: string;
+  stderr?: unknown;
+  effects: Effect[];
+};
 
 type Ctx = {
   state: State;
@@ -391,6 +398,12 @@ function ls(ctx: Ctx, args: string[]): Outcome {
   };
 }
 
+function read(ctx: Ctx, args: string[]): Outcome {
+  const p = parse(args, { bool: [], value: ["lines"] });
+  const t = find(ctx, p.rest[0]);
+  return { code: 0, text: script(ctx, t)?.screen ?? "", effects: [] };
+}
+
 function label(ctx: Ctx, args: string[]): Outcome {
   const p = parse(args, { bool: ["json"], value: [] });
   const [target, ...pairs] = p.rest;
@@ -429,6 +442,7 @@ const COMMANDS: Record<string, (ctx: Ctx, args: string[]) => Outcome> = {
   get,
   ls,
   label,
+  read,
   kill,
   rm,
 };

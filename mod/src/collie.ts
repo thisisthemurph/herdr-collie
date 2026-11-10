@@ -4,9 +4,10 @@
 // DECISION: the mod runs `collie` and `collie-controller` from the user's PATH (`make install`
 // puts them in ~/.local/bin), and uses ~/.collie: a mod can't read the user's environment.
 
-import type { Board } from "@collie/schema";
+import type { Board, StateFile } from "@collie/schema";
 import { readdir } from "fs/promises";
 import { exec, hc, home, readTextFile } from "herdr";
+import type { RunView } from "./model.ts";
 
 export const collieHome = () => `${home()}/.collie`;
 
@@ -37,6 +38,35 @@ export async function loadBoards(): Promise<Board[]> {
     ids.map((id) => readJson<Board>(`${collieHome()}/boards/${id}/board.json`)),
   );
   return boards.filter((b): b is Board => !!b?.id).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The board's run to show: the one in progress, else the most recent. Read from run.json and
+ * state.json, which the controller writes; the mod never reads events.jsonl.
+ */
+export async function loadRun(boardId: string): Promise<RunView | null> {
+  let ids: string[] = [];
+  try {
+    ids = await readdir(`${collieHome()}/runs`);
+  } catch {
+    return null;
+  }
+  const heads = (
+    await Promise.all(
+      ids.map(async (id) => {
+        const r = await readJson<{ id: string; board_id: string; number: number; status: RunView["status"] }>(
+          `${collieHome()}/runs/${id}/run.json`,
+        );
+        return r?.board_id === boardId ? r : null;
+      }),
+    )
+  ).filter((r): r is NonNullable<typeof r> => !!r);
+  const active = heads.filter((r) => r.status === "running" || r.status === "paused");
+  const pick = (active.length ? active : heads).sort((a, b) => b.number - a.number)[0];
+  if (!pick) return null;
+  const state = await readJson<StateFile>(`${collieHome()}/runs/${pick.id}/state.json`);
+  if (!state) return null;
+  return { id: pick.id, number: pick.number, status: state.status, boardId, state };
 }
 
 /** Whether a live controller holds controller.lock. */

@@ -52,6 +52,8 @@ export type Step = {
 export type AgentScript = {
   match?: { name?: string; labels?: Record<string, string> };
   app?: string;
+  /** What `hc read` prints: the terminal's visible screen. */
+  screen?: string;
   /** Really start the argv in the background (for end-to-end tests with fake-agent). */
   spawn?: boolean;
   run_error?: { kind: string; message: string; hint?: string };

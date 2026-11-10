@@ -1,0 +1,1 @@
+Decide whether this ticket is ready to implement. Read the code it would touch, check that the acceptance criteria are testable, and look for missing dependencies. Don't modify files. Ask about each real ambiguity with `collie ask`. Record suggestions, such as a split or a missing blocker, with `collie finding --category design`. Finish with a summary of scope and risks.

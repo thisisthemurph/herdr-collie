@@ -12,6 +12,7 @@ import {
   validateBoard,
   validateCommand,
 } from "@collie/schema";
+import { type AgentOptions, Agents } from "./agents.ts";
 import { handleCommand } from "./commands.ts";
 import { type Clock, type EventOpts, makeEvent } from "./events.ts";
 import { type Home, readJson, writeJsonAtomic } from "./home.ts";
@@ -44,12 +45,28 @@ export class Controller {
   /** The command being handled, so a run it ends can log it before ending. */
   private currentCommand: { id: string; command: string } | null = null;
 
+  /** Agent execution (Phase 4). Null when the controller has no hc to start agents with. */
+  readonly agents: Agents | null;
+
   constructor(
     readonly home: Home,
     readonly clock: Clock,
     readonly log: Logger,
     private readonly jira: JiraClient | null = null,
-  ) {}
+    agentOptions: AgentOptions | null = null,
+  ) {
+    this.agents = agentOptions ? new Agents(this, agentOptions) : null;
+  }
+
+  /** Runs the inbox watcher over one execution now (and returns how many lines it judged). */
+  sweepInbox(rl: RunLog, execId: string): number {
+    return processInbox(rl, execId, this.home, this.clock, this.agents?.hooks);
+  }
+
+  /** After recover(): reattach to what hc is running, and finish what a crash left half done. */
+  async reconcile(): Promise<void> {
+    if (this.agents) await this.agents.reconcile();
+  }
 
   requireJira(): JiraClient {
     if (!this.jira) throw new CommandError("unsupported", "this controller has no Jira client");
@@ -87,7 +104,8 @@ export class Controller {
       this.processCommands().catch((e) => this.log(`command loop failed: ${(e as Error).stack ?? e}`));
     }
     for (const rl of [...this.runs.values()]) {
-      for (const execId of Object.keys(rl.state.executions)) processInbox(rl, execId, this.home, this.clock);
+      for (const execId of Object.keys(rl.state.executions)) this.sweepInbox(rl, execId);
+      this.agents?.tick(rl);
       rl.maybeFlush(this.clock.now());
     }
   }
@@ -233,18 +251,26 @@ export class Controller {
     );
   }
 
-  /** Cancels every non-final execution of a ticket (Phase 4 will also kill their terminals). */
-  cancelExecutions(rl: RunLog, ticket: string, reason: string, cause: string): void {
+  /** Cancels every non-final execution of a ticket. Returns their ids, for killing their terminals. */
+  cancelExecutions(rl: RunLog, ticket: string, reason: string, cause: string): string[] {
+    const ids: string[] = [];
     for (const [id, e] of Object.entries(rl.state.executions)) {
       if (e.ticket === ticket && !isExecutionFinal(e.state)) {
         this.emit(rl, [this.execTo(rl, id, "cancelled", reason, { cause, source: "human" })]);
+        ids.push(id);
       }
     }
+    return ids;
   }
 
   cancelExecution(rl: RunLog, execId: string, reason: string, cause: string): void {
     this.emit(rl, [this.execTo(rl, execId, "cancelled", reason, { cause, source: "human" })]);
     this.emit(rl, resumeTicketIfClear(rl, execId, this.clock, cause));
+  }
+
+  /** Ends the terminals of cancelled executions (hc kill), logging each. */
+  async killTerminals(rl: RunLog, execIds: string[], reason: string): Promise<void> {
+    await this.agents?.killExecutions(rl, execIds, reason);
   }
 
   /** Ends a run as completed once every leased ticket is completed or cancelled. */

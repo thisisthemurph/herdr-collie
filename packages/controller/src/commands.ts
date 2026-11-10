@@ -98,22 +98,8 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
       return runCancel(c, cmd.id, cmd.args);
     case "run.delete":
       return runDelete(c, cmd.args.run_id);
-    case "ticket.cancel": {
-      const rl = c.requireRun(cmd.args.run_id);
-      const t = rl.state.tickets[cmd.args.ticket];
-      if (!t) throw new CommandError("not_found", `${cmd.args.ticket} is not in run ${rl.id}`);
-      if (isTicketFinal(t.state))
-        throw new CommandError("invalid_state", `${cmd.args.ticket} is already ${t.state}`);
-      c.cancelExecutions(rl, cmd.args.ticket, "ticket cancelled", cmd.id);
-      c.emit(rl, [
-        c.ticketTo(rl, cmd.args.ticket, "cancelled", "cancelled by a person", {
-          cause: cmd.id,
-          source: "human",
-        }),
-      ]);
-      c.completeRunIfDone(rl, cmd.id);
-      return {};
-    }
+    case "ticket.cancel":
+      return ticketCancel(c, cmd.id, cmd.args);
     case "exec.cancel": {
       const rl = c.requireRun(cmd.args.run_id);
       const e = rl.state.executions[cmd.args.execution_id];
@@ -122,7 +108,7 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
       if (isExecutionFinal(e.state))
         throw new CommandError("invalid_state", `execution ${cmd.args.execution_id} is already ${e.state}`);
       c.cancelExecution(rl, cmd.args.execution_id, "cancelled by a person", cmd.id);
-      return {};
+      return c.killTerminals(rl, [cmd.args.execution_id], "cancelled by a person").then(() => ({}));
     }
     case "question.answer": {
       const rl = c.requireRun(cmd.args.run_id);
@@ -154,9 +140,9 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
     case "board.refresh":
       return boardRefresh(c, cmd.args.board_id, cmd.id);
     case "ticket.investigate":
-      throw unsupported("ticket.investigate (needs agent execution)", 4);
+      throw unsupported("ticket.investigate (the requirements analyst)", 5);
     case "ticket.retry":
-      throw unsupported("ticket.retry (needs agent execution)", 4);
+      return ticketRetry(c, cmd.id, cmd.args);
     case "pr.mark_ready":
       throw unsupported("pr.mark_ready (needs Bitbucket)", 6);
   }
@@ -356,11 +342,54 @@ function runStart(c: Controller, cmdId: string, a: Args<"run.start">): Ok {
   return { run_id: rl.id };
 }
 
-function runCancel(c: Controller, cmdId: string, a: Args<"run.cancel">): Ok {
+async function ticketCancel(c: Controller, cmdId: string, a: Args<"ticket.cancel">): Promise<Ok> {
   const rl = c.requireRun(a.run_id);
+  const t = rl.state.tickets[a.ticket];
+  if (!t) throw new CommandError("not_found", `${a.ticket} is not in run ${rl.id}`);
+  if (isTicketFinal(t.state)) throw new CommandError("invalid_state", `${a.ticket} is already ${t.state}`);
+  const killed = c.cancelExecutions(rl, a.ticket, "ticket cancelled", cmdId);
+  c.emit(rl, [
+    c.ticketTo(rl, a.ticket, "cancelled", "cancelled by a person", { cause: cmdId, source: "human" }),
+  ]);
+  c.completeRunIfDone(rl, cmdId);
+  await c.killTerminals(rl, killed, "ticket cancelled");
+  return {};
+}
+
+/** ticket.retry: a ticket held for a failed execution gets a fresh developer, at attempt 1. */
+function ticketRetry(c: Controller, cmdId: string, a: Args<"ticket.retry">): Ok {
+  const rl = c.requireRun(a.run_id);
+  const t = rl.state.tickets[a.ticket];
+  if (!t) throw new CommandError("not_found", `${a.ticket} is not in run ${rl.id}`);
+  if (!c.agents) throw new CommandError("unsupported", "this controller can't start agents");
+  const held = t.attention.find((x) => x.kind === "execution_failed");
+  if (t.state !== "needs_input" || !held)
+    throw new CommandError(
+      "invalid_state",
+      `${a.ticket} is ${t.state}${t.state === "needs_input" ? " and isn't waiting on a failed execution; answer its question instead" : ""}; only a ticket held for a failed execution can be retried`,
+    );
+  if (rl.state.status !== "running")
+    throw new CommandError("invalid_state", `run ${rl.id} is ${rl.state.status}; resume it first`);
+  c.emit(rl, [
+    c.event(
+      rl.id,
+      "ticket.attention_removed",
+      { kind: "execution_failed" },
+      { ticket: a.ticket, cause: cmdId, source: "human" },
+    ),
+    c.ticketTo(rl, a.ticket, "in_progress", "retried by a person", { cause: cmdId, source: "human" }),
+  ]);
+  return { execution_id: c.agents.launch(rl, a.ticket, 1) };
+}
+
+async function runCancel(c: Controller, cmdId: string, a: Args<"run.cancel">): Promise<Ok> {
+  const rl = c.requireRun(a.run_id);
+  const killed: string[] = [];
   for (const [id, e] of Object.entries(rl.state.executions)) {
-    if (!isExecutionFinal(e.state))
+    if (!isExecutionFinal(e.state)) {
       c.emit(rl, [c.execTo(rl, id, "cancelled", "run cancelled", { cause: cmdId, source: "human" })]);
+      killed.push(id);
+    }
   }
   for (const k of rl.state.leases) {
     const t = rl.state.tickets[k];
@@ -368,6 +397,7 @@ function runCancel(c: Controller, cmdId: string, a: Args<"run.cancel">): Ok {
       c.emit(rl, [c.ticketTo(rl, k, "cancelled", "run cancelled", { cause: cmdId, source: "human" })]);
   }
   c.endRun(rl, "cancelled", a.reason ?? "cancelled by a person", cmdId, "human");
+  await c.killTerminals(rl, killed, "run cancelled");
   return {};
 }
 

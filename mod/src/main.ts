@@ -5,19 +5,29 @@
 import type { Board } from "@collie/schema";
 import { h_flex, Input, InputState, v_flex } from "gpui-base";
 import { div, PathBuilder, View } from "gpui-kit";
-import { props as herdrProps, theme, watchFolder } from "herdr";
-import { collieHome, controllerAlive, ctl, ensureController, loadBoards } from "./collie.ts";
+import { props as herdrProps, run as herdrRun, theme, watchFolder } from "herdr";
+import { collieHome, controllerAlive, ctl, ensureController, loadBoards, loadRun } from "./collie.ts";
 import {
   type Action,
   type BoardModel,
   boardModel,
   describeReply,
+  type ExecView,
   type ExternalRow,
   excludeAction,
+  execLine,
   externalActions,
   nextPreparation,
   parseImport,
+  type RunModel,
+  type RunView,
+  runModel,
+  startAction,
   type TicketRow,
+  type TicketRunView,
+  type Tone,
+  ticketRunActions,
+  watchCommand,
 } from "./model.ts";
 
 type Screen = "setup" | "graph" | "new";
@@ -36,6 +46,8 @@ const READINESS_LABEL: Record<string, string> = {
 
 export default class Collie extends View {
   boards: Board[] = [];
+  /** The board's run (the one going, else the latest), from ~/.collie/runs. */
+  runView: RunView | null = null;
   boardId: string | null = null;
   screen: Screen = "setup";
   selected: string | null = null;
@@ -144,6 +156,7 @@ export default class Collie extends View {
     this.boards = await loadBoards();
     this.alive = await controllerAlive();
     if (!this.boards.some((b) => b.id === this.boardId)) this.boardId = this.boards[0]?.id ?? null;
+    this.runView = this.boardId ? await loadRun(this.boardId) : null;
     if (this.selected && !this.board?.tickets[this.selected]) this.selected = null;
   }
 
@@ -185,6 +198,7 @@ export default class Collie extends View {
     const t = colors();
     const board = this.board;
     const model = board ? boardModel(board) : null;
+    const run = runModel(this.runView);
     return v_flex()
       .id("root")
       .size_full()
@@ -211,8 +225,8 @@ export default class Collie extends View {
             this.screen === "new" || !board || !model
               ? this.newBoard(t, !board)
               : this.screen === "graph"
-                ? this.graph(t, board, model)
-                : this.setup(t, board, model),
+                ? this.graph(t, board, model, run)
+                : this.setup(t, board, model, run),
           ),
       );
   }
@@ -233,6 +247,10 @@ export default class Collie extends View {
             this.boardId = b.id;
             this.selected = null;
             if (this.screen === "new") this.screen = "setup";
+            cx.spawn(async (cx: El) => {
+              await this.reload();
+              cx.notify();
+            });
             cx.notify();
           }),
         ),
@@ -298,7 +316,7 @@ export default class Collie extends View {
       .when(!!board, (el: El) => el.child(tab("setup", "Board setup")).child(tab("graph", "Graph")));
   }
 
-  setup(t: Theme, board: Board, m: BoardModel): El {
+  setup(t: Theme, board: Board, m: BoardModel, run: RunModel | null): El {
     const s = board.settings;
     return v_flex()
       .id("setup")
@@ -348,23 +366,9 @@ export default class Collie extends View {
             .child(m.startBlocked ?? ""),
         ),
       )
-      .child(
-        h_flex()
-          .gap(10)
-          .items_center()
-          .child(button(t, "start-run", "Start run", true, () => {}))
-          .child(
-            div()
-              .text_size(12)
-              .text_color(t.muted)
-              .child(
-                m.startBlocked ??
-                  `${m.counts.ready} ready · ${m.counts.blocked} blocked · ${m.counts.pending} not prepared · ${m.counts.excluded} excluded. Starting runs from Herdr arrives in Phase 4.`,
-              ),
-          ),
-      )
+      .child(this.runBar(t, board, m, run))
       .child(section(t, `Tickets (${m.rows.length})`))
-      .child(this.ticketTable(t, board, m.rows))
+      .child(this.ticketTable(t, board, m.rows, run))
       .when(m.externals.length > 0, (el: El) =>
         el
           .child(section(t, `Outside blockers (${m.externals.length})`))
@@ -372,7 +376,49 @@ export default class Collie extends View {
       );
   }
 
-  ticketTable(t: Theme, board: Board, rows: TicketRow[]): El {
+  /** Start run, or the run going now with its Pause, Resume and Cancel buttons. */
+  runBar(t: Theme, board: Board, m: BoardModel, run: RunModel | null): El {
+    const start = startAction(board.id, m, run);
+    return h_flex()
+      .gap(10)
+      .items_center()
+      .when(!run?.active, (el: El) =>
+        el.child(
+          button(
+            t,
+            start.action.id,
+            start.action.label,
+            !!start.disabled || this.busy || !this.alive,
+            (cx: El) => this.run(cx, start.action.command, start.action.args),
+          ),
+        ),
+      )
+      .when(!!run?.active, (el: El) => el.children(this.actionButtons(t, run?.actions ?? [])))
+      .child(
+        div()
+          .text_size(12)
+          .text_color(t.muted)
+          .child(
+            run
+              ? `Run ${run.number} · ${run.status} · ${run.progress}`
+              : (start.disabled ??
+                  `${m.counts.ready} ready · ${m.counts.blocked} blocked · ${m.counts.pending} not prepared · ${m.counts.excluded} excluded.`),
+          ),
+      )
+      .when(!!run && !run.active && !!start.disabled, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.blocked)
+            .child(start.disabled ?? ""),
+        ),
+      )
+      .when(!this.alive && !run?.active, (el: El) =>
+        el.child(div().text_size(12).text_color(t.blocked).child("Start the controller first.")),
+      );
+  }
+
+  ticketTable(t: Theme, board: Board, rows: TicketRow[], run: RunModel | null): El {
     const head = h_flex()
       .gap(10)
       .px(8)
@@ -383,7 +429,11 @@ export default class Collie extends View {
       .child(div().flex_1().child("SUMMARY"))
       .child(div().w(110).child("JIRA STATUS"))
       .child(div().w(120).child("PREPARATION"))
-      .child(div().w(110).child("READINESS"))
+      .child(
+        div()
+          .w(110)
+          .child(run ? "IN RUN" : "READINESS"),
+      )
       .child(div().w(200).child("BLOCKED BY"));
     return v_flex()
       .rounded(6)
@@ -435,7 +485,15 @@ export default class Collie extends View {
                   ),
                 ),
             )
-            .child(div().w(110).child(readinessBadge(t, r.readiness)))
+            .child(
+              div()
+                .w(110)
+                .child(
+                  run?.tickets[r.key]
+                    ? toneBadge(t, run.tickets[r.key]?.tone ?? "dim", run.tickets[r.key]?.label ?? "")
+                    : readinessBadge(t, r.readiness),
+                ),
+            )
             .child(
               div()
                 .w(200)
@@ -487,7 +545,7 @@ export default class Collie extends View {
       );
   }
 
-  graph(t: Theme, board: Board, m: BoardModel): El {
+  graph(t: Theme, board: Board, m: BoardModel, run: RunModel | null): El {
     const l = m.layout;
     const sel = this.selected;
     const readinessOf = new Map(m.rows.map((r) => [r.key, r.readiness]));
@@ -549,71 +607,104 @@ export default class Collie extends View {
     }
     const color = (s?: string) =>
       s === "ready" ? t.done : s === "blocked" ? t.blocked : s === "excluded" ? t.dim : t.idle;
+    // In a run a node shows where its ticket is (queued, developing, done...), not just readiness.
+    const dot = (key: string) => {
+      const rt = run?.tickets[key];
+      return rt ? tone(t, rt.tone) : color(readinessOf.get(key));
+    };
     const nodes = l.nodes.map((n) => {
       const ticket = board.tickets[n.key];
       const isSel = n.key === sel;
       const state = readinessOf.get(n.key);
-      return (
-        div()
-          .id(`node-${n.key}`)
-          .absolute()
-          .left(n.x)
-          .top(n.y)
-          .w(n.w)
-          .h(n.h)
-          .px(10)
-          .py(6)
-          .rounded(8)
-          .bg(n.external ? t.canvas : t.surface)
-          .border(isSel ? 2 : 1)
-          .border_color(isSel ? t.accent : m.critical.includes(n.key) ? t.blocked : t.border)
-          .when(n.external, (el: El) => el.border_dashed())
-          .cursor_pointer()
-          .hover((h: El) => h.bg(t.hover))
-          .on_click((_e: unknown, cx: El) => {
-            this.selected = this.selected === n.key ? null : n.key;
-            cx.notify();
-          })
-          .child(
-            h_flex()
-              .gap(6)
-              .items_center()
-              .child(
-                div()
-                  .w(8)
-                  .h(8)
-                  .rounded(4)
-                  .bg(n.external ? t.muted : color(state)),
-              )
-              .child(div().text_size(13).font_semibold().child(n.key))
-              .child(
-                div()
-                  .text_size(11)
-                  .text_color(t.muted)
-                  .child(n.external ? "outside" : READINESS_LABEL[state ?? "pending"]),
-              ),
-          )
-          .child(
-            div()
-              .text_size(11)
-              .text_color(t.muted)
-              .truncate()
-              .child(ticket?.summary ?? ""),
-          )
-          // Room for agent chips (Phase 4 draws them here).
-          .child(h_flex().id(`chips-${n.key}`).gap(4))
-      );
+      return div()
+        .id(`node-${n.key}`)
+        .absolute()
+        .left(n.x)
+        .top(n.y)
+        .w(n.w)
+        .h(n.h)
+        .px(10)
+        .py(6)
+        .rounded(8)
+        .bg(n.external ? t.canvas : t.surface)
+        .border(isSel ? 2 : 1)
+        .border_color(isSel ? t.accent : m.critical.includes(n.key) ? t.blocked : t.border)
+        .when(n.external, (el: El) => el.border_dashed())
+        .cursor_pointer()
+        .hover((h: El) => h.bg(t.hover))
+        .on_click((_e: unknown, cx: El) => {
+          this.selected = this.selected === n.key ? null : n.key;
+          cx.notify();
+        })
+        .child(
+          h_flex()
+            .gap(6)
+            .items_center()
+            .child(
+              div()
+                .w(8)
+                .h(8)
+                .rounded(4)
+                .bg(n.external ? t.muted : dot(n.key)),
+            )
+            .child(div().text_size(13).font_semibold().child(n.key))
+            .child(
+              div()
+                .text_size(11)
+                .text_color(t.muted)
+                .child(
+                  n.external
+                    ? "outside"
+                    : (run?.tickets[n.key]?.label ?? READINESS_LABEL[state ?? "pending"]),
+                ),
+            )
+            // The newest agent: a dot for its state, and its attempt.
+            .children((run?.tickets[n.key]?.executions ?? []).slice(-1).map((e) => execChip(t, n.key, e))),
+        )
+        .child(
+          div()
+            .text_size(11)
+            .text_color(t.muted)
+            .truncate()
+            .child(ticket?.summary ?? ""),
+        );
     });
     const canvas = div().relative().flex_none().w(l.width).h(l.height).children(layers).children(nodes);
     return h_flex()
       .size_full()
-      .child(div().id("graph-scroll").flex_1().min_w(0).h_full().overflow_scrollbar().child(canvas))
+      .child(
+        v_flex()
+          .flex_1()
+          .min_w(0)
+          .h_full()
+          .child(div().id("graph-scroll").flex_1().min_h(0).overflow_scrollbar().child(canvas))
+          .child(this.deliveryBar(t, run)),
+      )
       .when(!!sel && !!board.tickets[sel ?? ""], (el: El) =>
-        el.child(this.inspector(t, board, m, sel as string)),
+        el.child(this.inspector(t, board, m, sel as string, run)),
       );
   }
 
-  inspector(t: Theme, board: Board, m: BoardModel, key: string): El {
+  /** Under the graph: the run, and the pull request panel (empty until Phase 6). */
+  deliveryBar(t: Theme, run: RunModel | null): El {
+    return h_flex()
+      .id("delivery-bar")
+      .gap(14)
+      .px(16)
+      .py(8)
+      .items_center()
+      .text_size(12)
+      .text_color(t.muted)
+      .bg(t.surface)
+      .border_t(1)
+      .border_color(t.border)
+      .child(div().child(run ? `Run ${run.number} · ${run.status} · ${run.progress}` : "No run yet"))
+      .when(!!run?.active, (el: El) => el.children(this.actionButtons(t, run?.actions ?? [])))
+      .child(div().flex_1())
+      .child(div().child("Pull requests: none yet"));
+  }
+
+  inspector(t: Theme, board: Board, m: BoardModel, key: string, run: RunModel | null): El {
     const ticket = board.tickets[key];
     if (!ticket) return div();
     const row = m.rows.find((r) => r.key === key);
@@ -651,12 +742,89 @@ export default class Collie extends View {
           ),
       )
       .child(kv(t, "Blocks", blocks.join(", ") || "nothing"))
+      .when(!!run?.tickets[key], (el: El) => el.child(this.runSection(t, run as RunModel, key)))
       .when(!!ext, (el: El) =>
         el.children(this.actionButtons(t, externalActions(board.id, ext as ExternalRow, "insp-"))),
       )
       .when(!!row, (el: El) =>
         el.children(this.actionButtons(t, [excludeAction(board.id, key, ticket.preparation)])),
       );
+  }
+
+  /** A ticket's place in the run: its state, why it waits, its agents, and what you can do. */
+  runSection(t: Theme, run: RunModel, key: string): El {
+    const rt = run.tickets[key] as TicketRunView;
+    return v_flex()
+      .gap(8)
+      .child(section(t, `In run ${run.number}`))
+      .child(kv(t, "State", rt.label))
+      .when(rt.attention.length > 0, (el: El) =>
+        el.child(
+          div()
+            .p(8)
+            .rounded(6)
+            .border(1)
+            .border_color(t.blocked)
+            .text_size(12)
+            .text_color(t.blocked)
+            .child(`Needs you: ${rt.attention.join("; ")}.`),
+        ),
+      )
+      .when(!!rt.branch, (el: El) => el.child(kv(t, "Branch", rt.branch ?? "")))
+      .when(rt.executions.length > 0, (el: El) =>
+        el
+          .child(div().text_size(11).text_color(t.dim).child("Agents"))
+          .children(rt.executions.map((e) => this.execRow(t, e))),
+      )
+      .children(
+        ticketRunActions(run.id, rt).map((a) =>
+          button(t, `insp-${a.id}`, a.label, this.busy, (cx: El) => this.run(cx, a.command, a.args)),
+        ),
+      );
+  }
+
+  /** One agent: where it is, what it said, and a button to watch its terminal. */
+  execRow(t: Theme, e: ExecView): El {
+    return v_flex()
+      .id(`exec-${e.id}`)
+      .gap(3)
+      .p(8)
+      .rounded(6)
+      .border(1)
+      .border_color(e.blocked ? t.blocked : t.border)
+      .child(
+        h_flex()
+          .gap(6)
+          .items_center()
+          .child(
+            div()
+              .w(8)
+              .h(8)
+              .rounded(4)
+              .bg(tone(t, execTone(e))),
+          )
+          .child(div().text_size(12).child(execLine(e))),
+      )
+      .when(!!e.outcome, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(e.outcome ?? ""),
+        ),
+      )
+      .when(!!e.terminal && e.live, (el: El) => {
+        const w = watchCommand(e.terminal as string);
+        return el.child(
+          button(t, `watch-${e.id}`, "Watch terminal", false, () => {
+            try {
+              herdrRun(w.name, w.args);
+            } catch (err) {
+              this.message = { text: `couldn't open ${e.terminal}: ${(err as Error).message}`, error: true };
+            }
+          }),
+        );
+      });
   }
 
   /** Buttons for model actions; each runs its `collie ctl` command. */
@@ -796,6 +964,47 @@ function readinessBadge(t: Theme, state: string): El {
     .text_size(12)
     .child(div().w(8).h(8).rounded(4).bg(color))
     .child(READINESS_LABEL[state] ?? state);
+}
+
+const tone = (t: Theme, name: Tone): `#${string}` => t[name] as `#${string}`;
+
+const execTone = (e: ExecView): Tone =>
+  e.blocked
+    ? "blocked"
+    : e.state === "working" || e.state === "starting" || e.state === "created"
+      ? "working"
+      : e.state === "completed"
+        ? "done"
+        : e.state === "failed"
+          ? "blocked"
+          : "dim";
+
+/** A state in words, with its colored dot. */
+function toneBadge(t: Theme, name: Tone, label: string): El {
+  return h_flex()
+    .gap(6)
+    .items_center()
+    .text_size(12)
+    .child(div().w(8).h(8).rounded(4).bg(tone(t, name)))
+    .child(label);
+}
+
+/** The small marker under a graph node for one agent. */
+function execChip(t: Theme, key: string, e: ExecView): El {
+  return h_flex()
+    .id(`chip-${key}-${e.id}`)
+    .gap(3)
+    .items_center()
+    .text_size(10)
+    .text_color(t.muted)
+    .child(
+      div()
+        .w(6)
+        .h(6)
+        .rounded(3)
+        .bg(tone(t, execTone(e))),
+    )
+    .child(`dev ${e.attempt}${e.blocked ? " ⏸" : ""}`);
 }
 
 function section(t: Theme, label: string): El {

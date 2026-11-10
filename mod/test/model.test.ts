@@ -7,9 +7,15 @@ import {
   boardModel,
   describeReply,
   excludeAction,
+  execLine,
   externalActions,
   nextPreparation,
   parseImport,
+  type RunView,
+  runModel,
+  startAction,
+  ticketRunActions,
+  watchCommand,
 } from "../src/model.ts";
 
 const fixture = (name: string): Board =>
@@ -165,5 +171,177 @@ describe("button actions", () => {
         if (!r.ok) throw new Error(`${a.id}: ${formatIssues(r.issues)}`);
       }
     }
+  });
+});
+
+describe("a run in progress", () => {
+  const RUN = "01JC8YQ0000000000000000001";
+  const E1 = "01JC8Z1A000000000000000001";
+  const E2 = "01JC8Z1A000000000000000002";
+  const view = (status: "running" | "paused" | "completed" = "running"): RunView => ({
+    id: RUN,
+    number: 3,
+    status,
+    boardId: "01JC8XW0000000000000000001",
+    state: {
+      v: 1,
+      run_id: RUN,
+      last_event_id: null,
+      status,
+      leases: ["PAY-1", "PAY-2", "PAY-3"],
+      tickets: {
+        "PAY-1": {
+          state: "completed",
+          resume_state: null,
+          attention: [],
+          round: 1,
+          branch: "pay-1",
+          base: "main",
+          executions: [E1],
+          pr: null,
+        },
+        "PAY-2": {
+          state: "needs_input",
+          resume_state: "in_progress",
+          attention: [{ kind: "execution_failed", id: E2 }],
+          round: 1,
+          branch: "pay-2",
+          base: "pay-1",
+          executions: [E2],
+          pr: null,
+        },
+        "PAY-3": {
+          state: "in_progress",
+          resume_state: null,
+          attention: [],
+          round: 1,
+          branch: null,
+          base: null,
+          executions: [],
+          pr: null,
+        },
+      },
+      executions: {
+        [E1]: {
+          ticket: "PAY-1",
+          profile: "developer",
+          kind: "develop",
+          state: "completed",
+          attempt: 1,
+          round: 1,
+          terminal: "t4",
+          nudges: 0,
+          started_at: null,
+          ended_at: null,
+          result: { summary: "Added the table", commits: ["a1b2c3d"] },
+        },
+        [E2]: {
+          ticket: "PAY-2",
+          profile: "developer",
+          kind: "develop",
+          state: "failed",
+          attempt: 2,
+          round: 1,
+          terminal: "t5",
+          nudges: 2,
+          started_at: null,
+          ended_at: null,
+          result: { reason: "no report after 2 nudges", category: "tooling", retryable: true },
+        },
+      },
+      questions: {},
+      findings: [],
+      inbox_offsets: {},
+    },
+  });
+
+  test("tickets read as words and tones, with their executions", () => {
+    const m = runModel(view());
+    if (!m) throw new Error("no model");
+    expect(m.progress).toBe("1 of 3 done");
+    expect(Object.values(m.tickets).map((t) => [t.key, t.label, t.tone])).toEqual([
+      ["PAY-1", "Done", "done"],
+      ["PAY-2", "Needs you", "blocked"],
+      ["PAY-3", "Developing", "working"],
+    ]);
+    expect(m.tickets["PAY-2"]?.attention).toEqual(["its agent failed with no attempts left"]);
+    expect(m.tickets["PAY-1"]?.executions.map((e) => [e.outcome, execLine(e)])).toEqual([
+      ["Added the table", "attempt 1 · completed · t4"],
+    ]);
+    expect(m.tickets["PAY-2"]?.executions.map(execLine)).toEqual(["attempt 2 · failed · t5 · nudged 2×"]);
+  });
+
+  test("a blocked agent says what it waits for", () => {
+    const v = view();
+    const e = v.state.executions[E2];
+    if (!e) throw new Error("no execution");
+    e.state = "working";
+    e.agent_blocked = { kind: "permission", message: "approve Bash: go test" };
+    expect(runModel(v)?.tickets["PAY-2"]?.executions[0]?.blocked).toBe(
+      "waiting for permission: approve Bash: go test",
+    );
+  });
+
+  test("Pause, Resume and Cancel follow the run's status", () => {
+    const labels = (s: "running" | "paused" | "completed") => runModel(view(s))?.actions.map((a) => a.label);
+    expect(labels("running")).toEqual(["Pause run", "Cancel run"]);
+    expect(labels("paused")).toEqual(["Resume run", "Cancel run"]);
+    expect(labels("completed")).toEqual([]);
+  });
+
+  test("Start run is blocked by a cycle, an empty board, or a run already going", () => {
+    const board = fixture("single");
+    const bm = boardModel(board);
+    expect(startAction(board.id, bm, null)).toMatchObject({
+      disabled: null,
+      action: { command: "run.start" },
+    });
+    expect(startAction(board.id, boardModel(fixture("cycle")), null).disabled).toContain("Dependency cycle");
+    expect(startAction(board.id, bm, runModel(view()))?.disabled).toBe("Run 3 is running.");
+    expect(startAction(board.id, bm, runModel(view("completed")))?.disabled).toBeNull();
+  });
+
+  test("a held ticket offers Retry; every button sends a command the controller accepts", () => {
+    const m = runModel(view());
+    if (!m) throw new Error("no model");
+    const held = ticketRunActions(RUN, m.tickets["PAY-2"] as never);
+    expect(held.map((a) => a.label)).toEqual(["Retry with a new agent", "Cancel ticket"]);
+    const running = ticketRunActions(RUN, m.tickets["PAY-3"] as never);
+    expect(running.map((a) => a.label)).toEqual(["Cancel ticket"]);
+    expect(ticketRunActions(RUN, m.tickets["PAY-1"] as never)).toEqual([]);
+    const live = view();
+    const e = live.state.executions[E2];
+    if (!e) throw new Error("no execution");
+    e.state = "working";
+    const withLive = runModel(live);
+    const stop = ticketRunActions(RUN, withLive?.tickets["PAY-2"] as never);
+    expect(stop.map((a) => a.label)).toEqual([
+      "Retry with a new agent",
+      "Stop agent (attempt 2)",
+      "Cancel ticket",
+    ]);
+    for (const a of [
+      ...held,
+      ...stop,
+      ...(m.actions ?? []),
+      startAction("01JC8XW0000000000000000001", { startBlocked: null }, null).action,
+    ]) {
+      const r = validateCommand({
+        v: 1,
+        id: "01JC9A0C000000000000000001",
+        command: a.command,
+        at: "2026-11-09T10:00:00Z",
+        args: a.args,
+      });
+      if (!r.ok) throw new Error(`${a.id}: ${formatIssues(r.issues)}`);
+    }
+  });
+
+  test("watching an agent peeks at its terminal in Herdr", () => {
+    expect(watchCommand("t5")).toEqual({ name: "terminal.peek", args: { terminal: "t5" } });
+  });
+
+  test("no run, no model", () => {
+    expect(runModel(null)).toBeNull();
   });
 });
