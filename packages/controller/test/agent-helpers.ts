@@ -187,7 +187,14 @@ export function harness(
         ? readFileSync(join(hcDir, "calls.jsonl"), "utf8")
             .split("\n")
             .filter(Boolean)
-            .map((l) => JSON.parse(l))
+            .flatMap((l) => {
+              // fake-hc may be midway through appending the last line.
+              try {
+                return [JSON.parse(l)];
+              } catch {
+                return [];
+              }
+            })
         : [],
     restart: () => {
       h.c = make();
@@ -204,7 +211,7 @@ export function harness(
       }
       throw new Error(
         `gave up waiting for ${what}\ncontroller log:\n${log.join("\n")}\nlast events:\n${JSON.stringify(
-          readEvents(s.home, [...h.c.runs.keys()][0] ?? "").slice(-8),
+          [...h.c.runs.keys(), ...h.c.tracked.keys()].flatMap((id) => readEvents(s.home, id).slice(-12)),
           null,
           1,
         )}`,
