@@ -387,7 +387,10 @@ Shared conventions for every file in this section and the next: a top-level `"v"
 - `completion_policy.mode`: `done_only`, `done_or_resolved`, `done_or_testing` or `custom`, where `statuses` lists the Jira statuses that count.
 - `pr_draft_policy`: `draft_when_stacked` or `always_draft`.
 - `jira.cloud_id`: looked up once from `https://[SITE].atlassian.net/_edge/tenant_info` when the board is created. Every Jira call goes through `https://api.atlassian.com/ex/jira/{cloud_id}/rest/api/3/…`, because a scoped token is rejected on the site URL.
-- `completion_policy` modes map to Jira's `statusCategory.key` (`new`, `indeterminate`, `done`) for `done_only`; `done_or_resolved` adds a non-null `resolution`; the other modes and `custom` match status names.
+- `completion_policy` modes map to Jira's `statusCategory.key` (`new`, `indeterminate`, `done`) for `done_only`; `done_or_resolved` adds a non-null `resolution`; `done_or_testing` adds any status whose name mentions "test" or "QA"; `custom` matches the listed status names, ignoring case.
+- Dependencies come from Jira's **Blocks** links only. On issue A, `{type: Blocks, outwardIssue: B}` means A blocks B, and `{inwardIssue: B}` means B blocks A (confirmed against real issues; `fixtures/jira/`). A link seen from either end counts. A linked issue not on the board becomes a ticket with `on_board: false`; links carry its summary and status but not its resolution, so that stays null until it's pulled in or refreshed.
+- `board.create` without `jira.cloud_id` looks it up from the site's `/_edge/tenant_info`. `run.start` refuses a board whose in-scope tickets have a dependency cycle (`cycle_detected`, naming the cycle); an overridden link doesn't count.
+- In an active run, readiness is recalculated whenever the board changes (`board.refresh`, `board.import`, `ticket.pull_in`, `ticket.set_preparation`, `dep.override`/`dep.restore`): outside blockers use the board's current Jira data and overrides, in-run blockers count once `completed` in the run.
 - `jira_writeback` values are **target status names**. Each write lists the issue's transitions and picks the one whose `to.name` matches, preferring an exact transition `name` when there's more than one. If none matches, the controller logs `jira.writeback_skipped` with the available targets and carries on; the ticket isn't failed.
 - An entry in `overrides` makes the scheduler ignore that one blocking link.
 
@@ -526,7 +529,7 @@ A successful reply is `{"v": 1, "id": …, "ok": true, "result": {…}}`.
 | --- | --- | --- |
 | `board.create` | `name`, `jira`, `repo`, `settings` | `board_id` |
 | `board.import` | `board_id`, `keys` or `jql` | `added`, `external` |
-| `board.refresh` | `board_id` | `changed` |
+| `board.refresh` | `board_id` | `changed`, `missing` (keys Jira no longer returns), `readiness_changed` (tickets moved in the board's active run) |
 | `board.update_settings` | `board_id`, partial `settings` | — |
 | `ticket.set_preparation` | `board_id`, `ticket`, `preparation` | — |
 | `ticket.pull_in` | `board_id`, `ticket` | `added` |

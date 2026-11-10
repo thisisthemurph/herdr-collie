@@ -30,14 +30,14 @@ beforeEach(() => {
 });
 afterEach(() => s.cleanup());
 
-const startRun = (board = BOARD, id?: string) =>
-  ok(command(c, "run.start", { board_id: board }, id)).run_id as string;
+const startRun = async (board = BOARD, id?: string) =>
+  ok(await command(c, "run.start", { board_id: board }, id)).run_id as string;
 const state = (runId: string) =>
   c.runs.get(runId)?.state ?? JSON.parse(readFileSync(s.home.state(runId), "utf8"));
 
 describe("run.start", () => {
-  test("snapshots config, leases every ticket and logs the start", () => {
-    const runId = startRun();
+  test("snapshots config, leases every ticket and logs the start", async () => {
+    const runId = await startRun();
     const run = validateRun(JSON.parse(readFileSync(s.home.runFile(runId), "utf8")));
     if (!run.ok) throw new Error(formatIssues(run.issues));
     expect(run.value).toMatchObject({ id: runId, board_id: BOARD, number: 1, status: "running" });
@@ -50,23 +50,30 @@ describe("run.start", () => {
       "ticket.state_changed",
       "ticket.state_changed",
       "command.applied",
+      // Readiness: both tickets are prepared and unblocked.
+      "ticket.state_changed",
+      "ticket.state_changed",
+    ]);
+    expect(Object.values(state(runId).tickets).map((t) => (t as { state: string }).state)).toEqual([
+      "ready",
+      "ready",
     ]);
     expect(state(runId).leases).toEqual(["PAY-101", "PAY-102"]);
     const leases = validateLeases(JSON.parse(readFileSync(s.home.leases, "utf8")));
     expect(leases.ok && leases.value.leases).toEqual({ "PAY-101": runId, "PAY-102": runId });
   });
 
-  test("a later edit to the board doesn't change the running run's snapshot", () => {
-    const runId = startRun();
-    ok(command(c, "board.update_settings", { board_id: BOARD, settings: { max_agents: 1 } }));
+  test("a later edit to the board doesn't change the running run's snapshot", async () => {
+    const runId = await startRun();
+    ok(await command(c, "board.update_settings", { board_id: BOARD, settings: { max_agents: 1 } }));
     const run = JSON.parse(readFileSync(s.home.runFile(runId), "utf8"));
     expect(run.snapshot.settings.max_agents).toBe(6);
   });
 
-  test("a ticket leased by another run is refused with a clear reason", () => {
-    const first = startRun();
+  test("a ticket leased by another run is refused with a clear reason", async () => {
+    const first = await startRun();
     saveBoard(s.home, BOARD2, ["PAY-102", "PAY-103"]);
-    const r = command(c, "run.start", { board_id: BOARD2 });
+    const r = await command(c, "run.start", { board_id: BOARD2 });
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe("lease_conflict");
@@ -75,30 +82,30 @@ describe("run.start", () => {
     );
     expect(c.runs.size).toBe(1);
     // Once the first run ends, the lease is free.
-    ok(command(c, "run.cancel", { run_id: first }));
-    expect(startRun(BOARD2)).toBeString();
+    ok(await command(c, "run.cancel", { run_id: first }));
+    expect(await startRun(BOARD2)).toBeString();
   });
 
-  test("one active run per board", () => {
-    startRun();
-    const r = command(c, "run.start", { board_id: BOARD });
+  test("one active run per board", async () => {
+    await startRun();
+    const r = await command(c, "run.start", { board_id: BOARD });
     expect(!r.ok && r.error.code).toBe("invalid_state");
   });
 
-  test("a missing workflow or profile is named", () => {
+  test("a missing workflow or profile is named", async () => {
     saveBoard(s.home, BOARD2, ["PAY-201"], {
       settings: { ...JSON.parse(readFileSync(s.home.board(BOARD), "utf8")).settings, workflow: "nope" },
     });
-    const r = command(c, "run.start", { board_id: BOARD2 });
+    const r = await command(c, "run.start", { board_id: BOARD2 });
     expect(!r.ok && r.error).toEqual({
       code: "not_found",
       message: "workflow nope doesn't exist; save it first with workflow.save",
     });
   });
 
-  test("running the same command again after a crash is a no-op", () => {
+  test("running the same command again after a crash is a no-op", async () => {
     const id = "01JC9A0C000000000000000001";
-    const runId = startRun(BOARD, id);
+    const runId = await startRun(BOARD, id);
     expect(runId).toBe(id);
     writeFileSync(
       join(s.home.pending, `${id}.json`),
@@ -111,46 +118,47 @@ describe("run.start", () => {
       }),
     );
     writeFileSync(join(s.home.done, `${id}.json`), "{}");
-    c.processCommands();
+    await c.processCommands();
     expect(existsSync(join(s.home.pending, `${id}.json`))).toBe(false);
     expect(readEvents(s.home, runId).filter((e) => e.type === "run.started").length).toBe(1);
   });
 
-  test("carry over starts completed tickets as completed", () => {
-    const first = startRun();
-    ok(command(c, "ticket.cancel", { run_id: first, ticket: "PAY-102" }));
+  test("carry over starts completed tickets as completed", async () => {
+    const first = await startRun();
+    ok(await command(c, "ticket.cancel", { run_id: first, ticket: "PAY-102" }));
     const rl = c.runs.get(first);
     if (!rl) throw new Error("run ended early");
     // PAY-101 completes in the first run (delivery arrives in Phase 6; written directly here).
     c.emit(
       rl,
-      ["ready", "in_progress", "delivering", "completed"].map((to, i, all) =>
+      ["in_progress", "delivering", "completed"].map((to, i, all) =>
         c.event(
           first,
           "ticket.state_changed",
-          { from: i === 0 ? "pending" : all[i - 1], to, reason: "test" },
+          { from: i === 0 ? "ready" : all[i - 1], to, reason: "test" },
           { ticket: "PAY-101" },
         ),
       ),
     );
     c.completeRunIfDone(rl, null);
     expect(c.runs.has(first)).toBe(false);
-    const second = ok(command(c, "run.start", { board_id: BOARD, carry_over_from: first })).run_id as string;
+    const second = ok(await command(c, "run.start", { board_id: BOARD, carry_over_from: first }))
+      .run_id as string;
     expect(state(second).tickets["PAY-101"].state).toBe("completed");
-    expect(state(second).tickets["PAY-102"].state).toBe("pending");
+    expect(state(second).tickets["PAY-102"].state).toBe("ready");
   });
 });
 
 describe("run lifecycle", () => {
-  test("pause, resume and cancel follow the run state machine", () => {
-    const runId = startRun();
-    expect(command(c, "run.resume", { run_id: runId }).ok).toBe(false);
-    ok(command(c, "run.pause", { run_id: runId, reason: "lunch" }));
+  test("pause, resume and cancel follow the run state machine", async () => {
+    const runId = await startRun();
+    expect((await command(c, "run.resume", { run_id: runId })).ok).toBe(false);
+    ok(await command(c, "run.pause", { run_id: runId, reason: "lunch" }));
     expect(state(runId).status).toBe("paused");
     expect(JSON.parse(readFileSync(s.home.runFile(runId), "utf8")).status).toBe("paused");
-    ok(command(c, "run.resume", { run_id: runId }));
+    ok(await command(c, "run.resume", { run_id: runId }));
     const exec = seedExecution(c, c.runs.get(runId) as never, "PAY-101", "developer");
-    ok(command(c, "run.cancel", { run_id: runId }));
+    ok(await command(c, "run.cancel", { run_id: runId }));
     const st = state(runId);
     expect(st.status).toBe("cancelled");
     expect(st.leases).toEqual([]);
@@ -161,17 +169,17 @@ describe("run lifecycle", () => {
     ]);
     const run = JSON.parse(readFileSync(s.home.runFile(runId), "utf8"));
     expect([run.status, run.end_reason]).toEqual(["cancelled", "cancelled by a person"]);
-    expect(command(c, "run.pause", { run_id: runId })).toMatchObject({
+    expect(await command(c, "run.pause", { run_id: runId })).toMatchObject({
       ok: false,
       error: { code: "invalid_state" },
     });
   });
 
-  test("the run completes when every ticket is completed or cancelled", () => {
-    const runId = startRun();
-    ok(command(c, "ticket.cancel", { run_id: runId, ticket: "PAY-101" }));
+  test("the run completes when every ticket is completed or cancelled", async () => {
+    const runId = await startRun();
+    ok(await command(c, "ticket.cancel", { run_id: runId, ticket: "PAY-101" }));
     expect(c.runs.has(runId)).toBe(true);
-    ok(command(c, "ticket.cancel", { run_id: runId, ticket: "PAY-102" }));
+    ok(await command(c, "ticket.cancel", { run_id: runId, ticket: "PAY-102" }));
     expect(c.runs.has(runId)).toBe(false);
     const ev = readEvents(s.home, runId);
     expect(ev.slice(-3).map((e) => e.type)).toEqual(["ticket.released", "ticket.released", "run.completed"]);
@@ -179,27 +187,27 @@ describe("run lifecycle", () => {
     expect(ev.filter((e) => e.type === "command.applied").length).toBe(3);
   });
 
-  test("run.delete refuses a live run, then removes an ended one", () => {
-    const runId = startRun();
-    expect(command(c, "run.delete", { run_id: runId })).toMatchObject({
+  test("run.delete refuses a live run, then removes an ended one", async () => {
+    const runId = await startRun();
+    expect(await command(c, "run.delete", { run_id: runId })).toMatchObject({
       ok: false,
       error: { code: "invalid_state" },
     });
-    ok(command(c, "run.cancel", { run_id: runId }));
-    ok(command(c, "run.delete", { run_id: runId }));
+    ok(await command(c, "run.cancel", { run_id: runId }));
+    ok(await command(c, "run.delete", { run_id: runId }));
     expect(existsSync(s.home.runDir(runId))).toBe(false);
   });
 
-  test("commands that need later phases say which phase", () => {
-    const runId = startRun();
-    expect(command(c, "ticket.retry", { run_id: runId, ticket: "PAY-101" })).toMatchObject({
+  test("commands that need later phases say which phase", async () => {
+    const runId = await startRun();
+    expect(await command(c, "ticket.retry", { run_id: runId, ticket: "PAY-101" })).toMatchObject({
       ok: false,
       error: {
         code: "unsupported",
         message: "ticket.retry (needs agent execution) is not supported yet; it arrives in Phase 4",
       },
     });
-    expect(command(c, "board.import", { board_id: BOARD, jql: "project = PAY" })).toMatchObject({
+    expect(await command(c, "board.import", { board_id: BOARD, jql: "project = PAY" })).toMatchObject({
       ok: false,
       error: { code: "unsupported" },
     });
@@ -210,8 +218,8 @@ describe("run lifecycle", () => {
     });
   });
 
-  test("an invalid command gets invalid_args naming the field", () => {
-    expect(command(c, "run.start", { board: BOARD })).toMatchObject({
+  test("an invalid command gets invalid_args naming the field", async () => {
+    expect(await command(c, "run.start", { board: BOARD })).toMatchObject({
       ok: false,
       error: { code: "invalid_args", message: "args.board_id: is required" },
     });
@@ -219,10 +227,10 @@ describe("run lifecycle", () => {
 });
 
 describe("boards", () => {
-  test("board.create applies defaults, and its id is the command id", () => {
+  test("board.create applies defaults, and its id is the command id", async () => {
     const id = "01JC9A0C000000000000000009";
     const r = ok(
-      command(
+      await command(
         c,
         "board.create",
         {
@@ -244,23 +252,23 @@ describe("boards", () => {
     expect([b.settings.max_tickets, b.settings.complete_at]).toEqual([5, "pr_created"]);
   });
 
-  test("dep.override and dep.restore edit overrides, checking the link exists", () => {
+  test("dep.override and dep.restore edit overrides, checking the link exists", async () => {
     saveBoard(s.home, BOARD2, ["PAY-201", "PAY-202"]);
     const b = JSON.parse(readFileSync(s.home.board(BOARD2), "utf8"));
     b.tickets["PAY-202"].blocked_by = ["PAY-201"];
     writeFileSync(s.home.board(BOARD2), JSON.stringify(b));
-    ok(command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" }));
+    ok(await command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" }));
     expect(JSON.parse(readFileSync(s.home.board(BOARD2), "utf8")).overrides).toHaveLength(1);
-    expect(command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" }).ok).toBe(
-      false,
-    );
     expect(
-      command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-999", blocked: "PAY-202" }),
+      (await command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" })).ok,
+    ).toBe(false);
+    expect(
+      await command(c, "dep.override", { board_id: BOARD2, blocker: "PAY-999", blocked: "PAY-202" }),
     ).toMatchObject({
       ok: false,
       error: { code: "not_found", message: "PAY-202 isn't blocked by PAY-999" },
     });
-    ok(command(c, "dep.restore", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" }));
+    ok(await command(c, "dep.restore", { board_id: BOARD2, blocker: "PAY-201", blocked: "PAY-202" }));
     expect(JSON.parse(readFileSync(s.home.board(BOARD2), "utf8")).overrides).toEqual([]);
   });
 });
@@ -269,8 +277,8 @@ describe("inbox watcher", () => {
   const RUN = "01JC8YQ0P4E2W7H5S8D3F6G9KB";
   const EXEC = "01JC8Z1A9C4V6B2N8M5X7Z3QWE";
 
-  test("a fixture inbox produces exactly the expected accept and reject events", () => {
-    startRun(BOARD, RUN);
+  test("a fixture inbox produces exactly the expected accept and reject events", async () => {
+    await startRun(BOARD, RUN);
     const rl = c.runs.get(RUN);
     if (!rl) throw new Error("no run");
     seedTicketInProgress(c, rl, "PAY-101");
@@ -311,8 +319,8 @@ describe("inbox watcher", () => {
     });
   });
 
-  test("an ask moves the execution and ticket to needs_input; done clears it", () => {
-    const runId = startRun();
+  test("an ask moves the execution and ticket to needs_input; done clears it", async () => {
+    const runId = await startRun();
     const rl = c.runs.get(runId);
     if (!rl) throw new Error("no run");
     seedTicketInProgress(c, rl, "PAY-101");
@@ -328,7 +336,7 @@ describe("inbox watcher", () => {
       attention: [{ kind: "question", id: qid }],
     });
     ok(
-      command(c, "question.answer", {
+      await command(c, "question.answer", {
         run_id: runId,
         question_id: qid,
         answer: "404",
@@ -341,7 +349,7 @@ describe("inbox watcher", () => {
       share_with_ticket: true,
     });
     expect(
-      command(c, "question.answer", {
+      await command(c, "question.answer", {
         run_id: runId,
         question_id: qid,
         answer: "403",
@@ -365,8 +373,8 @@ describe("inbox watcher", () => {
     });
   });
 
-  test("an agent reporting while its execution is still starting moves it to working", () => {
-    const runId = startRun();
+  test("an agent reporting while its execution is still starting moves it to working", async () => {
+    const runId = await startRun();
     const rl = c.runs.get(runId);
     if (!rl) throw new Error("no run");
     const exec = seedExecution(c, rl, "PAY-101", "developer", { state: "starting" });
@@ -375,23 +383,23 @@ describe("inbox watcher", () => {
     expect(rl.state.executions[exec]?.state).toBe("working");
   });
 
-  test("exec.cancel ends an execution and releases its question's hold on the ticket", () => {
-    const runId = startRun();
+  test("exec.cancel ends an execution and releases its question's hold on the ticket", async () => {
+    const runId = await startRun();
     const rl = c.runs.get(runId);
     if (!rl) throw new Error("no run");
     seedTicketInProgress(c, rl, "PAY-101");
     const exec = seedExecution(c, rl, "PAY-101", "developer");
     writeFileSync(s.home.inbox(runId, exec), agentLine(runId, exec, "PAY-101", "ask", { question: "q?" }));
     c.tick();
-    ok(command(c, "exec.cancel", { run_id: runId, execution_id: exec }));
+    ok(await command(c, "exec.cancel", { run_id: runId, execution_id: exec }));
     expect(rl.state.executions[exec]?.state).toBe("cancelled");
     expect(rl.state.tickets["PAY-101"]?.state).toBe("in_progress");
   });
 });
 
 describe("state", () => {
-  test("live state equals a rebuild from events.jsonl, and state.json matches after a flush", () => {
-    const runId = startRun();
+  test("live state equals a rebuild from events.jsonl, and state.json matches after a flush", async () => {
+    const runId = await startRun();
     const rl = c.runs.get(runId);
     if (!rl) throw new Error("no run");
     seedTicketInProgress(c, rl, "PAY-101");
@@ -414,14 +422,14 @@ describe("state", () => {
     if (!v.ok) throw new Error(formatIssues(v.issues));
   });
 
-  test("state.json is written at most every 250 ms, and on flush", () => {
+  test("state.json is written at most every 250 ms, and on flush", async () => {
     const { c: c2, clock } = inProcess(s);
-    const runId = ok(command(c2, "run.start", { board_id: BOARD })).run_id as string;
+    const runId = ok(await command(c2, "run.start", { board_id: BOARD })).run_id as string;
     const rl = c2.runs.get(runId);
     if (!rl) throw new Error("no run");
     const before = readFileSync(s.home.state(runId), "utf8");
     clock.advance(100);
-    ok(command(c2, "run.pause", { run_id: runId }));
+    ok(await command(c2, "run.pause", { run_id: runId }));
     expect(readFileSync(s.home.state(runId), "utf8")).toBe(before);
     clock.advance(200);
     c2.tick();

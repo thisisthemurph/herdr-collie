@@ -16,5 +16,13 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true
   },
-  "include": ["packages/*/src", "packages/*/test", "tools/*/src", "tools/*/test", "fixtures/src"]
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "tools/*/src",
+    "tools/*/test",
+    "fixtures/src",
+    "mod/src/model.ts",
+    "mod/test"
+  ]
 }

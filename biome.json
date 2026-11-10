@@ -17,7 +17,8 @@
       "!fixtures/files",
       "!fixtures/runs",
       "!fixtures/hc",
-      "!fixtures/home"
+      "!fixtures/home",
+      "!fixtures/boards"
     ]
   },
   "formatter": {

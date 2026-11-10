@@ -9,18 +9,19 @@
 //   files/<kind>/{valid,invalid}/*.json   config, runtime and control files
 //   runs/complete/                    events.jsonl, run.json, state.json and executions/ for one complete run
 //   home/                             a COLLIE_HOME for `collie show` (one run, mid-remediation)
+//   boards/                           boards of many shapes, for the graph and layout tests
 // Every invalid/ folder has expected.json: file name -> the field path the error must name
 // ("" for whole-line problems such as a missing newline).
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { rebuild } from "@collie/controller/reducer";
-import { type AnyEvent, CONTROLLER_EVENT_TYPES } from "@collie/schema";
+import { type AnyEvent, type Board, CONTROLLER_EVENT_TYPES } from "@collie/schema";
 import { buildCompleteRun, type FixtureEvent } from "./complete-run.ts";
 import { analyst, board, developer, securityReviewer, smallBugFix, standardFeature } from "./config.ts";
 import { FixtureClock } from "./ids.ts";
 
 const ROOT = join(import.meta.dir, "..");
-const GENERATED_DIRS = ["inbox", "events", "files", "runs", "home"];
+const GENERATED_DIRS = ["inbox", "events", "files", "runs", "home", "boards"];
 
 type Json = Record<string, unknown>;
 const out = new Map<string, string>();
@@ -765,6 +766,133 @@ Time limit: 60 minutes.
 `,
   );
   put(`${runPath}/executions/${DEV}/inbox.jsonl`, "");
+}
+
+// --- boards/: graph shapes for the layout and readiness tests
+{
+  const T = board.tickets["PAY-101"] as Board["tickets"][string];
+  const mk = (
+    name: string,
+    links: Record<string, string[]>,
+    opts: { external?: string[]; done?: string[]; overrides?: [string, string][] } = {},
+  ) => {
+    const keys = new Set<string>(Object.keys(links));
+    for (const bs of Object.values(links)) for (const b of bs) keys.add(b);
+    const tickets: Board["tickets"] = {};
+    for (const k of [...keys].sort()) {
+      const done = opts.done?.includes(k);
+      tickets[k] = {
+        ...T,
+        summary: `Ticket ${k}`,
+        jira_status: done ? "Done" : "To Do",
+        status_category: done ? "done" : "new",
+        resolution: done ? "Done" : null,
+        blocked_by: [...(links[k] ?? [])].sort(),
+        on_board: !opts.external?.includes(k),
+        preparation: opts.external?.includes(k) ? "unreviewed" : "ready",
+      };
+    }
+    const b: Board = {
+      ...board,
+      name: `Shape: ${name}`,
+      tickets,
+      overrides: (opts.overrides ?? []).map(([blocker, blocked]) => ({
+        blocker,
+        blocked,
+        by: "human",
+        at: "2026-11-08T09:52:00Z",
+      })),
+    };
+    put(`boards/${name}.json`, pretty(b));
+  };
+  mk("single", { "PAY-1": [] });
+  mk("chain", { "PAY-1": [], "PAY-2": ["PAY-1"], "PAY-3": ["PAY-2"], "PAY-4": ["PAY-3"] });
+  mk("fan-in-fan-out", {
+    "PAY-1": [],
+    "PAY-2": [],
+    "PAY-3": [],
+    "PAY-4": ["PAY-1", "PAY-2", "PAY-3"],
+    "PAY-5": ["PAY-4"],
+    "PAY-6": ["PAY-4"],
+    "PAY-7": ["PAY-4"],
+  });
+  mk("diamond", { "PAY-1": [], "PAY-2": ["PAY-1"], "PAY-3": ["PAY-1"], "PAY-4": ["PAY-2", "PAY-3"] });
+  // Edges that skip layers: PAY-1 -> PAY-5 spans four columns, past PAY-2..4.
+  mk("long-edges", {
+    "PAY-1": [],
+    "PAY-2": ["PAY-1"],
+    "PAY-3": ["PAY-2"],
+    "PAY-4": ["PAY-3"],
+    "PAY-5": ["PAY-4", "PAY-1"],
+    "PAY-6": ["PAY-1", "PAY-3"],
+    "PAY-7": ["PAY-2"],
+  });
+  mk(
+    "external-blockers",
+    { "PAY-1": ["OPS-77"], "PAY-2": ["PAY-1", "SEC-9"], "PAY-3": ["OPS-77", "PAY-2"] },
+    { external: ["OPS-77", "SEC-9"], done: ["SEC-9"] },
+  );
+  mk("cycle", {
+    "PAY-1": ["PAY-3"],
+    "PAY-2": ["PAY-1"],
+    "PAY-3": ["PAY-2"],
+    "PAY-4": ["PAY-3"],
+    "PAY-5": [],
+  });
+  mk(
+    "cycle-overridden",
+    { "PAY-1": ["PAY-3"], "PAY-2": ["PAY-1"], "PAY-3": ["PAY-2"] },
+    { overrides: [["PAY-3", "PAY-1"]] },
+  );
+  mk("islands", {
+    "PAY-1": [],
+    "PAY-2": ["PAY-1"],
+    "PAY-10": [],
+    "PAY-11": ["PAY-10"],
+    "PAY-12": ["PAY-10"],
+    "PAY-20": [],
+  });
+  // The spike's 20-node graph (docs/spike.md, experiment 4), with EXT-9 outside the board.
+  mk(
+    "spike-20",
+    {
+      "PAY-101": [],
+      "PAY-102": [],
+      "PAY-103": [],
+      "PAY-104": ["PAY-101"],
+      "PAY-105": ["PAY-101", "PAY-102"],
+      "PAY-106": ["PAY-102", "EXT-9"],
+      "PAY-107": ["PAY-103"],
+      "PAY-108": ["PAY-103"],
+      "PAY-109": ["PAY-104"],
+      "PAY-110": ["PAY-105"],
+      "PAY-111": ["PAY-105", "PAY-106"],
+      "PAY-112": ["PAY-107", "PAY-108"],
+      "PAY-113": ["PAY-108"],
+      "PAY-114": ["PAY-109"],
+      "PAY-115": ["PAY-110", "PAY-111"],
+      "PAY-116": ["PAY-111"],
+      "PAY-117": ["PAY-112", "PAY-113"],
+      "PAY-118": ["PAY-115", "PAY-116"],
+      "PAY-119": ["PAY-117", "PAY-114"],
+    },
+    { external: ["EXT-9"], done: ["PAY-101", "PAY-104"] },
+  );
+  // A deterministic pseudo-random DAG: 40 tickets, each blocked by up to 3 earlier ones.
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const random: Record<string, string[]> = {};
+  for (let i = 1; i <= 40; i++) {
+    const k = `PAY-${i}`;
+    const n = i === 1 ? 0 : Math.floor(rand() * 4);
+    const bs = new Set<string>();
+    for (let j = 0; j < n; j++) bs.add(`PAY-${1 + Math.floor(rand() * (i - 1))}`);
+    random[k] = [...bs];
+  }
+  mk("random-40", random);
 }
 
 // --- the complete run

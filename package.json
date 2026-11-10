@@ -5,13 +5,14 @@
   "workspaces": [
     "packages/*",
     "tools/*",
-    "fixtures"
+    "fixtures",
+    "mod"
   ],
   "scripts": {
     "lint": "biome check .",
     "format": "biome format --write .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test ./packages ./tools"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p mod/tsconfig.json --noEmit",
+    "test": "bun test ./packages ./tools ./mod"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",

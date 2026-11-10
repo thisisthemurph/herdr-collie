@@ -1,10 +1,13 @@
 // ULID generation: 48-bit millisecond time, then 80 random bits, in Crockford base32.
-import { randomBytes } from "node:crypto";
+// Web Crypto (globalThis.crypto), not node:crypto, so the schema also runs in the Herdr mod.
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** A new ULID. Ids sort by creation time to the millisecond. */
-export function newUlid(now: number = Date.now(), random: Uint8Array = randomBytes(10)): string {
+export function newUlid(
+  now: number = Date.now(),
+  random: Uint8Array = crypto.getRandomValues(new Uint8Array(10)),
+): string {
   let time = "";
   let t = now;
   for (let i = 0; i < 10; i++) {

@@ -48,6 +48,7 @@ why; every `DECISION:`; known gaps; exact commands to run the phase demo.
 
 ```
 packages/schema/       types + runtime validators for every contract
+packages/board/        pure board logic: Jira links, graph, cycles, readiness, layout
 packages/cli/          the `collie` binary (agent commands + `collie ctl`)
 packages/controller/   the controller process, harness adapters, templates
 mod/                   the Herdr mod (UI)

@@ -14,7 +14,7 @@ function parseLine<T>(schema: Schema<T>, line: string): LineResult<T> {
       issues: [{ path: "", message: "line has no trailing newline (incomplete write)" }],
     };
   }
-  const bytes = Buffer.byteLength(line, "utf8");
+  const bytes = new TextEncoder().encode(line).length;
   if (bytes > MAX_INBOX_LINE_BYTES) {
     return {
       ok: false,
