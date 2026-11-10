@@ -281,7 +281,10 @@ describe("tracking after the run ends", () => {
     );
     git(h.repo, "push", "-q", bare, "main");
     host.pr(1).state = "MERGED";
-    await h.settle(() => prOf(runId, "PAY-102")?.destination === "main", "the child to be retargeted");
+    await h.settle(
+      () => prOf(runId, "PAY-102")?.destination === "main" && prOf(runId, "PAY-102")?.needs_rebase === true,
+      "the child to be retargeted and flagged",
+    );
     expect(prOf(runId, "PAY-102")).toMatchObject({ draft: false, needs_rebase: true, destination: "main" });
     // Once the child has main's head in its history again (rebased or merged by hand), the flag clears.
     const child = h.state(runId).tickets["PAY-102"]?.branch as string;

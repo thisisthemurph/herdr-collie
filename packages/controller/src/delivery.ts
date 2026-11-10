@@ -267,8 +267,10 @@ export class Delivery {
       const t = rl.state.tickets[key];
       if (!t?.pr) return;
       try {
+        const before = t.pr.destination;
         const info = await this.o.host.getPr(board.repo, t.pr.id);
-        this.recordPr(rl, key, info);
+        // A retarget that landed while this request was out makes its destination stale.
+        this.recordPr(rl, key, info, rl.state.tickets[key]?.pr?.destination === before);
       } catch (e) {
         this.c.log(`${key}: couldn't read PR #${t.pr.id}: ${(e as Error).message}`);
         return;
@@ -278,13 +280,13 @@ export class Delivery {
   }
 
   /** `pr.updated` for what changed since the last poll. */
-  private recordPr(rl: RunLog, key: string, info: PrInfo): void {
+  private recordPr(rl: RunLog, key: string, info: PrInfo, destinationIsCurrent = true): void {
     const pr = rl.state.tickets[key]?.pr;
     if (!pr) return;
     const change: Record<string, unknown> = {};
     if (info.state !== pr.state) change.state = info.state;
     if (info.draft !== pr.draft) change.draft = info.draft;
-    if (info.destination !== pr.destination) change.base = info.destination;
+    if (destinationIsCurrent && info.destination !== pr.destination) change.base = info.destination;
     if (info.approvals !== pr.approvals) change.approvals = info.approvals;
     if (Object.keys(change).length === 0) return;
     this.c.emit(rl, [this.c.event(rl.id, "pr.updated", { number: pr.id, ...change }, { ticket: key })]);
