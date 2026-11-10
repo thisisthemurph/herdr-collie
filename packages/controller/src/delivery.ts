@@ -296,26 +296,28 @@ export class Delivery {
   private async checkConflicts(rl: RunLog, board: Board, key: string): Promise<void> {
     const pr = rl.state.tickets[key]?.pr;
     if (!pr) return;
+    // `pr` is live state that the reducer changes in place, so keep what this check is about.
+    const { id, source, destination } = pr;
     try {
-      const dest = await this.o.remote.fetchBranch(this.repoPath(board), board.repo, pr.destination);
-      const r = await mergeConflicts(this.repoPath(board), dest, pr.source);
+      const dest = await this.o.remote.fetchBranch(this.repoPath(board), board.repo, destination);
+      const r = await mergeConflicts(this.repoPath(board), dest, source);
       const now = rl.state.tickets[key]?.pr;
       // The destination may have been retargeted while git ran; that result is about the old one.
-      if (!now || now.destination !== pr.destination) return;
+      if (!now || now.destination !== destination) return;
       if (now && (now.conflicted !== r.conflicted || now.conflict_checked_at === null)) {
         this.c.emit(rl, [
           this.c.event(
             rl.id,
             "pr.conflict_checked",
-            { number: pr.id, conflicted: r.conflicted, paths: r.paths },
+            { number: id, conflicted: r.conflicted, paths: r.paths },
             { ticket: key },
           ),
         ]);
       }
-      if (now.needs_rebase && (await isAncestor(this.repoPath(board), dest, pr.source))) {
-        if (rl.state.tickets[key]?.pr?.destination !== pr.destination) return;
+      if (now.needs_rebase && (await isAncestor(this.repoPath(board), dest, source))) {
+        if (rl.state.tickets[key]?.pr?.destination !== destination) return;
         this.c.emit(rl, [
-          this.c.event(rl.id, "pr.updated", { number: pr.id, needs_rebase: false }, { ticket: key }),
+          this.c.event(rl.id, "pr.updated", { number: id, needs_rebase: false }, { ticket: key }),
         ]);
       }
     } catch (e) {
