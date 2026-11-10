@@ -115,3 +115,22 @@ export function verifyDeveloperDone(o: {
   if (status.code === 0 && status.stdout) return "the worktree has uncommitted changes; commit them first";
   return null;
 }
+
+/**
+ * A detached worktree at `ref` (a local branch), for the analyst, which only reads. A folder that
+ * is already a worktree is moved to `ref` when it is clean, and otherwise left as it is.
+ */
+export async function ensureDetachedWorktree(o: { repo: string; path: string; ref: string }): Promise<void> {
+  if (!existsSync(o.repo) || (await git(o.repo, ["rev-parse", "--git-dir"])).code !== 0) {
+    throw new WorktreeError(`${o.repo} is not a git repository; check the board's repo local_path`);
+  }
+  if (existsSync(o.path)) {
+    if ((await git(o.path, ["rev-parse", "--git-dir"])).code !== 0)
+      throw new WorktreeError(`${o.path} exists but is not a worktree; move it away and retry`);
+    if (!(await git(o.path, ["status", "--porcelain"])).stdout)
+      await git(o.path, ["checkout", "--detach", o.ref]);
+    return;
+  }
+  const r = await git(o.repo, ["worktree", "add", "--detach", o.path, o.ref]);
+  if (r.code !== 0) throw new WorktreeError(`git worktree add --detach failed: ${r.stderr}`);
+}

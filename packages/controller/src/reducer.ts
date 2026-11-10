@@ -142,6 +142,14 @@ export function reduce(s: StateFile, ev: AnyEvent): StateFile {
         e.agent_blocked = null;
         withdrawQuestions(s, ev.execution_id as string);
       }
+      // DECISION (Phase 5): findings are addressed when a remediation round that saw them
+      // completes. No event of its own: it follows from the remediation's final state change.
+      if (e.state === "completed" && e.kind === "remediate") {
+        for (const f of s.findings) {
+          if (f.ticket === e.ticket && f.addressed_in_round === null && f.round <= e.round)
+            f.addressed_in_round = e.round;
+        }
+      }
       break;
     }
     case "execution.nudged":

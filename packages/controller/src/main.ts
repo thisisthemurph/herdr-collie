@@ -9,6 +9,7 @@ import { newUlid } from "@collie/schema";
 import { defaultAdapters } from "./adapters/index.ts";
 import { Controller } from "./controller.ts";
 import { keychainJira } from "./credentials.ts";
+import { seedDefaults } from "./defaults.ts";
 import { Hc, spawnHc } from "./hc.ts";
 import { defaultHome, Home } from "./home.ts";
 import { fetchHttp, JiraClient } from "./jira.ts";
@@ -47,6 +48,8 @@ export function start(root: string): { controller: Controller; stop: () => void 
     : { hc: new Hc(spawnHc(process.env.COLLIE_HC ?? "hc")), adapters: defaultAdapters(), briefs: jira };
   const controller = new Controller(home, { now: () => Date.now(), id: () => newUlid() }, log, jira, agents);
   controller.recover();
+  const seeded = seedDefaults(home);
+  if (seeded.length) log(`saved the default ${seeded.join(", ")}`);
   log(`controller started (home ${root})`);
   controller.reconcile().catch((e) => log(`reconcile failed: ${(e as Error).stack ?? e}`));
   let stopped = false;

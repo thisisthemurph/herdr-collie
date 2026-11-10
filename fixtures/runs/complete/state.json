@@ -183,7 +183,7 @@
       "title": "Payment id not checked against caller's account",
       "file": "src/payments/repo.go",
       "line": 88,
-      "addressed_in_round": null
+      "addressed_in_round": 1
     }
   ],
   "inbox_offsets": {

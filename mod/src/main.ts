@@ -2,27 +2,53 @@
 // It holds no state of its own beyond what's on screen: boards come from ~/.collie, changes go
 // through `collie ctl`, and the folder watch redraws it, so reloading the mod loses nothing.
 
-import type { Board } from "@collie/schema";
+import type { Board, StateFile } from "@collie/schema";
 import { h_flex, Input, InputState, v_flex } from "gpui-base";
 import { div, PathBuilder, View } from "gpui-kit";
-import { props as herdrProps, run as herdrRun, theme, watchFolder } from "herdr";
-import { collieHome, controllerAlive, ctl, ensureController, loadBoards, loadRun } from "./collie.ts";
+import { props as herdrProps, run as herdrRun, notify, panes, theme, watchFolder } from "herdr";
+import {
+  collieHome,
+  controllerAlive,
+  ctl,
+  ensureController,
+  loadBoards,
+  loadPrep,
+  loadRun,
+  loadWorkflows,
+} from "./collie.ts";
 import {
   type Action,
+  alerts,
+  answerAction,
   type BoardModel,
   boardModel,
   describeReply,
   type ExecView,
   type ExternalRow,
   excludeAction,
+  execChipLabel,
   execLine,
   externalActions,
+  type FindingRow,
+  findingRows,
+  findingTickets,
+  investigateAction,
+  investigateTargets,
+  type NeedAction,
+  type NeedItem,
+  needsYou,
   nextPreparation,
+  nextWorkflow,
   parseImport,
+  prepModel,
+  type QuestionRow,
+  questionRows,
   type RunModel,
   type RunView,
   runModel,
+  type Summaries,
   startAction,
+  summariesOf,
   type TicketRow,
   type TicketRunView,
   type Tone,
@@ -30,7 +56,7 @@ import {
   watchCommand,
 } from "./model.ts";
 
-type Screen = "setup" | "graph" | "new";
+type Screen = "setup" | "graph" | "findings" | "questions" | "new";
 /** Herdr's theme colors are hex strings; gpui-kit types colors as `#...`. */
 type Theme = Record<string, `#${string}`>;
 const colors = () => theme() as unknown as Theme;
@@ -56,6 +82,19 @@ export default class Collie extends View {
   alive = false;
   importBox!: InputState;
   fields!: Record<string, InputState>;
+  /** The analyst's questions, executions and findings for the board (boards/<id>/prep/state.json). */
+  prep: StateFile | null = null;
+  workflows: { id: string; name: string }[] = [];
+  /** The question dialog: which question, and whether it is a run's or the analyst's. */
+  dialog: { scope: "run" | "prep"; questionId: string } | null = null;
+  answerBox!: InputState;
+  // DECISION: "Share this answer with other agents on this ticket" starts unchecked: sharing is
+  // opt-in, since a one-off answer can mislead the ticket's other agents.
+  share = false;
+  dialogError: string | null = null;
+  sending = false;
+  /** The Findings tab's ticket filter; null shows every ticket. */
+  findingsFilter: string | null = null;
 
   init(_initArg: unknown, cx: El) {
     // Where you were: the last screen, board and selection, so reloading the mod puts you back.
@@ -69,6 +108,8 @@ export default class Collie extends View {
     this.selected = props.selected ?? saved.selected ?? null;
     this.importBox = InputState.new({ placeholder: "Issue keys (PAY-1, PAY-2) or JQL, then Import" });
     this.importBox.on("submit", (_e, cx) => this.doImport(cx));
+    this.answerBox = InputState.new({ placeholder: "Type your answer, or pick an option above" });
+    this.answerBox.on("submit", (_e, cx) => this.sendAnswer(cx));
     this.fields = {
       name: InputState.new({ placeholder: "Board name, e.g. Payments API – Q4" }),
       site: InputState.new({ placeholder: "Jira site, e.g. example.atlassian.net" }),
@@ -156,8 +197,25 @@ export default class Collie extends View {
     this.boards = await loadBoards();
     this.alive = await controllerAlive();
     if (!this.boards.some((b) => b.id === this.boardId)) this.boardId = this.boards[0]?.id ?? null;
+    const before = this.runView;
     this.runView = this.boardId ? await loadRun(this.boardId) : null;
+    this.prep = this.boardId ? await loadPrep(this.boardId) : null;
+    this.workflows = await loadWorkflows();
+    // Notifications: only what changed since the last look, never what was there when the mod opened.
+    if (before && this.runView)
+      for (const a of alerts(before, this.runView, summariesOf(this.board))) this.announce(a);
     if (this.selected && !this.board?.tickets[this.selected]) this.selected = null;
+  }
+
+  /** Raises a Herdr notification that, when clicked, shows this tab. */
+  announce(a: { title: string; body: string; level: "info" | "success" | "warning" | "error" }) {
+    try {
+      // The tab this mod copy lives in (props().pane is documented for pane mods; if Herdr gives a
+      // tab mod no pane, the notification simply has no action).
+      const pane = (herdrProps() as { pane?: string } | undefined)?.pane;
+      const tab = pane ? panes().find((p) => p.pane === pane)?.tab : undefined;
+      notify({ ...a, ...(tab ? { action: { name: "tab.select", args: { id: tab } } } : {}) });
+    } catch {}
   }
 
   get board(): Board | null {
@@ -191,6 +249,53 @@ export default class Collie extends View {
     });
   }
 
+  // --- questions
+
+  openDialog(scope: "run" | "prep", questionId: string, cx: El) {
+    this.dialog = { scope, questionId };
+    this.answerBox.set_value("");
+    this.share = false;
+    this.dialogError = null;
+    cx.notify();
+  }
+
+  /** Sends the dialog's answer. A rejection (say, already answered) is shown in the dialog. */
+  sendAnswer(cx: El) {
+    const d = this.dialog;
+    if (!d || this.sending) return;
+    const scopeId = d.scope === "run" ? this.runView?.id : this.boardId;
+    if (!scopeId) return;
+    const r = answerAction(scopeId, d.questionId, this.answerBox.value(), this.share);
+    if ("error" in r) {
+      this.dialogError = r.error;
+      cx.notify();
+      return;
+    }
+    this.sending = true;
+    this.dialogError = null;
+    cx.notify();
+    cx.spawn(async (cx: El) => {
+      const reply = await ctl(r.action.command, r.action.args);
+      this.sending = false;
+      if (reply.ok) {
+        this.dialog = null;
+        this.message = { text: "Answer sent.", error: false };
+      } else this.dialogError = reply.error?.message ?? "The answer was not accepted.";
+      await this.reload();
+      cx.notify();
+    });
+  }
+
+  /** Shows an agent's live terminal over this tab. */
+  watchTerminal(terminal: string) {
+    const w = watchCommand(terminal);
+    try {
+      herdrRun(w.name, w.args);
+    } catch (err) {
+      this.message = { text: `couldn't open ${terminal}: ${(err as Error).message}`, error: true };
+    }
+  }
+
   // --- rendering
 
   render(_cx: El) {
@@ -198,9 +303,11 @@ export default class Collie extends View {
     const t = colors();
     const board = this.board;
     const model = board ? boardModel(board) : null;
-    const run = runModel(this.runView);
+    const summaries = summariesOf(board);
+    const run = runModel(this.runView, summaries);
     return v_flex()
       .id("root")
+      .relative()
       .size_full()
       .bg(t.canvas)
       .text_color(t.foreground)
@@ -225,10 +332,15 @@ export default class Collie extends View {
             this.screen === "new" || !board || !model
               ? this.newBoard(t, !board)
               : this.screen === "graph"
-                ? this.graph(t, board, model, run)
-                : this.setup(t, board, model, run),
+                ? this.graph(t, board, model, run, summaries)
+                : this.screen === "findings"
+                  ? this.findingsView(t, summaries)
+                  : this.screen === "questions"
+                    ? this.questionsView(t, summaries)
+                    : this.setup(t, board, model, run),
           ),
-      );
+      )
+      .when(!!this.dialog, (el: El) => el.child(this.dialogView(t, summaries)));
   }
 
   header(t: Theme): El {
@@ -308,12 +420,23 @@ export default class Collie extends View {
           cx.notify();
         })
         .child(label);
+    const st = this.runView?.state;
+    const openQuestions =
+      Object.values(st?.questions ?? {}).filter((q) => q.state === "open").length +
+      Object.values(this.prep?.questions ?? {}).filter((q) => q.state === "open").length;
+    const openFindings = (st?.findings ?? []).filter((f) => f.addressed_in_round === null).length;
     return h_flex()
       .px(10)
       .gap(4)
       .border_b(1)
       .border_color(t.border)
-      .when(!!board, (el: El) => el.child(tab("setup", "Board setup")).child(tab("graph", "Graph")));
+      .when(!!board, (el: El) =>
+        el
+          .child(tab("setup", "Board setup"))
+          .child(tab("graph", "Graph"))
+          .child(tab("findings", openFindings ? `Findings (${openFindings})` : "Findings"))
+          .child(tab("questions", openQuestions ? `Questions (${openQuestions})` : "Questions")),
+      );
   }
 
   setup(t: Theme, board: Board, m: BoardModel, run: RunModel | null): El {
@@ -366,13 +489,98 @@ export default class Collie extends View {
             .child(m.startBlocked ?? ""),
         ),
       )
+      .child(this.workflowBar(t, board))
       .child(this.runBar(t, board, m, run))
-      .child(section(t, `Tickets (${m.rows.length})`))
+      .child(
+        h_flex()
+          .gap(10)
+          .items_center()
+          .child(section(t, `Tickets (${m.rows.length})`))
+          .when(investigateTargets(m.rows).length > 0, (el: El) => {
+            const a = investigateAction(board.id, investigateTargets(m.rows));
+            return el.child(
+              button(t, a.id, a.label, this.busy || !this.alive, (cx: El) => this.run(cx, a.command, a.args)),
+            );
+          }),
+      )
       .child(this.ticketTable(t, board, m.rows, run))
+      .child(this.prepSection(t, board))
       .when(m.externals.length > 0, (el: El) =>
         el
           .child(section(t, `Outside blockers (${m.externals.length})`))
           .child(this.externalTable(t, board, m)),
+      );
+  }
+
+  /** The board's default workflow: one chip per workflow found in ~/.collie/workflows. */
+  workflowBar(t: Theme, board: Board): El {
+    const current = board.settings.workflow;
+    const ids = this.workflows.map((w) => w.id);
+    return h_flex()
+      .gap(6)
+      .items_center()
+      .child(div().text_size(12).text_color(t.muted).child("Default workflow"))
+      .children(
+        (ids.includes(current) ? this.workflows : [{ id: current, name: current }, ...this.workflows]).map(
+          (w) =>
+            pill(t, `wf-${w.id}`, w.name, w.id === current, (cx: El) => {
+              if (w.id !== current)
+                this.run(cx, "board.update_settings", { board_id: board.id, settings: { workflow: w.id } });
+            }),
+        ),
+      )
+      .when(this.workflows.length === 0, (el: El) =>
+        el.child(div().text_size(12).text_color(t.dim).child("(none found in ~/.collie/workflows)")),
+      );
+  }
+
+  /** The analyst's open questions and notes, per ticket (board preparation). */
+  prepSection(t: Theme, board: Board): El {
+    const items = prepModel(board, this.prep);
+    if (items.length === 0) return div();
+    return v_flex()
+      .gap(8)
+      .child(section(t, "Preparation"))
+      .children(
+        items.map((it) =>
+          v_flex()
+            .id(`prep-${it.key}`)
+            .gap(6)
+            .p(10)
+            .rounded(6)
+            .border(1)
+            .border_color(it.questions.length ? t.blocked : t.border)
+            .bg(t.surface)
+            .child(
+              h_flex()
+                .gap(8)
+                .text_size(13)
+                .child(div().font_semibold().child(it.key))
+                .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(it.summary))
+                .child(div().text_size(12).text_color(t.muted).child(it.preparation.replaceAll("_", " "))),
+            )
+            .children(
+              it.questions.map((q) =>
+                h_flex()
+                  .gap(8)
+                  .items_center()
+                  .child(div().flex_1().min_w(0).text_size(13).child(`${q.asker} asks: ${q.question}`))
+                  .child(
+                    button(t, `prep-answer-${q.id}`, "Answer", false, (cx: El) =>
+                      this.openDialog("prep", q.id, cx),
+                    ),
+                  ),
+              ),
+            )
+            .children(
+              it.notes.map((n) =>
+                div()
+                  .text_size(12)
+                  .text_color(t.muted)
+                  .child(`Note${n.blocking ? " (blocking)" : ""}: ${n.title}`),
+              ),
+            ),
+        ),
       );
   }
 
@@ -420,21 +628,23 @@ export default class Collie extends View {
 
   ticketTable(t: Theme, board: Board, rows: TicketRow[], run: RunModel | null): El {
     const head = h_flex()
-      .gap(10)
+      .gap(6)
       .px(8)
       .py(4)
       .text_size(11)
       .text_color(t.dim)
-      .child(div().w(90).child("KEY"))
+      .child(div().w(64).child("KEY"))
       .child(div().flex_1().child("SUMMARY"))
-      .child(div().w(110).child("JIRA STATUS"))
-      .child(div().w(120).child("PREPARATION"))
+      .child(div().w(80).child("JIRA"))
+      .child(div().w(100).child("PREPARATION"))
       .child(
         div()
-          .w(110)
+          .w(96)
           .child(run ? "IN RUN" : "READINESS"),
       )
-      .child(div().w(200).child("BLOCKED BY"));
+      .child(div().w(100).child("WORKFLOW"))
+      .child(div().w(64).child("BLOCKED BY"))
+      .child(div().w(100));
     return v_flex()
       .rounded(6)
       .border(1)
@@ -445,7 +655,7 @@ export default class Collie extends View {
         rows.map((r) =>
           h_flex()
             .id(`row-${r.key}`)
-            .gap(10)
+            .gap(6)
             .px(8)
             .py(6)
             .items_center()
@@ -466,10 +676,10 @@ export default class Collie extends View {
                 .child(r.key),
             )
             .child(div().flex_1().min_w(0).truncate().child(r.summary))
-            .child(div().w(110).text_color(t.muted).truncate().child(r.jiraStatus))
+            .child(div().w(80).text_color(t.muted).truncate().child(r.jiraStatus))
             .child(
               div()
-                .w(120)
+                .w(100)
                 .child(
                   pill(
                     t,
@@ -487,7 +697,7 @@ export default class Collie extends View {
             )
             .child(
               div()
-                .w(110)
+                .w(96)
                 .child(
                   run?.tickets[r.key]
                     ? toneBadge(t, run.tickets[r.key]?.tone ?? "dim", run.tickets[r.key]?.label ?? "")
@@ -496,7 +706,23 @@ export default class Collie extends View {
             )
             .child(
               div()
-                .w(200)
+                .w(100)
+                .child(
+                  pill(t, `wf-${r.key}`, r.workflow ?? "default", r.workflow !== null, (cx: El) =>
+                    this.run(cx, "ticket.set_workflow", {
+                      board_id: board.id,
+                      ticket: r.key,
+                      workflow: nextWorkflow(
+                        r.workflow,
+                        this.workflows.map((w) => w.id),
+                      ),
+                    }),
+                  ),
+                ),
+            )
+            .child(
+              div()
+                .w(64)
                 .text_size(12)
                 .text_color(t.muted)
                 .truncate()
@@ -509,6 +735,25 @@ export default class Collie extends View {
                         )
                         .join(", ")
                     : "—",
+                ),
+            )
+            .child(
+              div()
+                .w(100)
+                .child(
+                  button(
+                    t,
+                    `inv-${r.key}`,
+                    "Investigate",
+                    this.busy ||
+                      !this.alive ||
+                      r.preparation === "investigating" ||
+                      r.preparation === "excluded",
+                    (cx: El) => {
+                      const a = investigateAction(board.id, [r.key]);
+                      this.run(cx, a.command, a.args);
+                    },
+                  ),
                 ),
             ),
         ),
@@ -545,7 +790,8 @@ export default class Collie extends View {
       );
   }
 
-  graph(t: Theme, board: Board, m: BoardModel, run: RunModel | null): El {
+  graph(t: Theme, board: Board, m: BoardModel, run: RunModel | null, summaries: Summaries): El {
+    const needs = this.runView ? needsYou(this.runView, summaries) : [];
     const l = m.layout;
     const sel = this.selected;
     const readinessOf = new Map(m.rows.map((r) => [r.key, r.readiness]));
@@ -658,8 +904,14 @@ export default class Collie extends View {
                     : (run?.tickets[n.key]?.label ?? READINESS_LABEL[state ?? "pending"]),
                 ),
             )
-            // The newest agent: a dot for its state, and its attempt.
-            .children((run?.tickets[n.key]?.executions ?? []).slice(-1).map((e) => execChip(t, n.key, e))),
+            // The agent going (or how many), or the newest: a dot for its state, and its kind and round.
+            .children(
+              (() => {
+                const rt = run?.tickets[n.key];
+                const chip = rt ? execChipLabel(rt) : null;
+                return chip?.exec ? [execChip(t, n.key, chip.text, chip.exec)] : [];
+              })(),
+            ),
         )
         .child(
           div()
@@ -677,12 +929,55 @@ export default class Collie extends View {
           .flex_1()
           .min_w(0)
           .h_full()
+          .when(needs.length > 0, (el: El) => el.child(this.needsBanner(t, needs)))
           .child(div().id("graph-scroll").flex_1().min_h(0).overflow_scrollbar().child(canvas))
           .child(this.deliveryBar(t, run)),
       )
       .when(!!sel && !!board.tickets[sel ?? ""], (el: El) =>
         el.child(this.inspector(t, board, m, sel as string, run)),
       );
+  }
+
+  /** The Needs you banner: each thing that holds a ticket for a person, with its button. */
+  needsBanner(t: Theme, items: NeedItem[]): El {
+    return v_flex()
+      .id("needs-you")
+      .flex_none()
+      .gap(6)
+      .px(16)
+      .py(8)
+      .max_h(190)
+      .overflow_y_scrollbar()
+      .bg(t.surface)
+      .border_b(1)
+      .border_color(t.blocked)
+      .child(div().text_size(12).font_semibold().text_color(t.blocked).child(`NEEDS YOU (${items.length})`))
+      .children(
+        items.map((i) =>
+          h_flex()
+            .id(`need-${i.key}`)
+            .gap(10)
+            .items_center()
+            .text_size(12)
+            .child(div().w(70).font_semibold().child(i.ticket))
+            .child(
+              v_flex()
+                .flex_1()
+                .min_w(0)
+                .child(div().truncate().child(i.summary))
+                .child(div().truncate().text_color(t.muted).child(i.reason)),
+            )
+            .children(i.actions.map((a) => this.needButton(t, a))),
+        ),
+      );
+  }
+
+  needButton(t: Theme, a: NeedAction): El {
+    return button(t, a.id, a.label, a.type === "ctl" && this.busy, (cx: El) => {
+      if (a.type === "answer") this.openDialog(a.scope, a.questionId, cx);
+      else if (a.type === "ctl") this.run(cx, a.command, a.args);
+      else this.watchTerminal(a.terminal);
+    });
   }
 
   /** Under the graph: the run, and the pull request panel (empty until Phase 6). */
@@ -731,6 +1026,7 @@ export default class Collie extends View {
       .when(!!row, (el: El) =>
         el
           .child(kv(t, "Preparation", ticket.preparation.replaceAll("_", " ")))
+          .child(kv(t, "Workflow", ticket.workflow ?? `${board.settings.workflow} (board default)`))
           .child(kv(t, "Readiness", READINESS_LABEL[row?.readiness ?? "pending"] ?? ""))
           .child(
             kv(
@@ -771,6 +1067,31 @@ export default class Collie extends View {
         ),
       )
       .when(!!rt.branch, (el: El) => el.child(kv(t, "Branch", rt.branch ?? "")))
+      .when(rt.openQuestions.length > 0, (el: El) =>
+        el.children(
+          rt.openQuestions.map((q) =>
+            v_flex()
+              .id(`insp-q-${q.id}`)
+              .gap(4)
+              .p(8)
+              .rounded(6)
+              .border(1)
+              .border_color(t.blocked)
+              .child(div().text_size(11).text_color(t.dim).child(q.asker))
+              .child(div().text_size(12).child(q.question))
+              .child(
+                button(t, `insp-answer-${q.id}`, "Answer", false, (cx: El) =>
+                  this.openDialog("run", q.id, cx),
+                ),
+              ),
+          ),
+        ),
+      )
+      .when(rt.openFindings.length > 0, (el: El) =>
+        el
+          .child(div().text_size(11).text_color(t.dim).child(`Open findings (${rt.openFindings.length})`))
+          .children(rt.openFindings.map((f) => this.findingRow(t, f, false))),
+      )
       .when(rt.executions.length > 0, (el: El) =>
         el
           .child(div().text_size(11).text_color(t.dim).child("Agents"))
@@ -813,18 +1134,321 @@ export default class Collie extends View {
             .child(e.outcome ?? ""),
         ),
       )
-      .when(!!e.terminal && e.live, (el: El) => {
-        const w = watchCommand(e.terminal as string);
-        return el.child(
-          button(t, `watch-${e.id}`, "Watch terminal", false, () => {
-            try {
-              herdrRun(w.name, w.args);
-            } catch (err) {
-              this.message = { text: `couldn't open ${e.terminal}: ${(err as Error).message}`, error: true };
-            }
-          }),
-        );
-      });
+      .when(!!e.terminal && e.live, (el: El) =>
+        el.child(
+          button(t, `watch-${e.id}`, "Watch terminal", false, () => this.watchTerminal(e.terminal as string)),
+        ),
+      );
+  }
+
+  /** One finding: severity, blocking, title, where, round; dimmed once addressed. */
+  findingRow(t: Theme, f: FindingRow, withTicket = true): El {
+    const sev =
+      f.severity === "critical" || f.severity === "high"
+        ? t.blocked
+        : f.severity === "medium"
+          ? t.idle
+          : t.dim;
+    return v_flex()
+      .id(`finding-${f.id}`)
+      .gap(2)
+      .p(8)
+      .rounded(6)
+      .border(1)
+      .border_color(t.border)
+      .bg(t.surface)
+      .opacity(f.addressed ? 0.5 : 1)
+      .child(
+        h_flex()
+          .gap(8)
+          .items_center()
+          .text_size(12)
+          .child(div().font_semibold().text_color(sev).child(f.severity.toUpperCase()))
+          .when(f.blocking, (el: El) =>
+            el.child(div().font_semibold().text_color(t.blocked).child("BLOCKING")),
+          )
+          .when(withTicket, (el: El) => el.child(div().font_semibold().child(f.ticket)))
+          .child(div().flex_1().min_w(0).text_size(13).child(f.title)),
+      )
+      .child(
+        div()
+          .text_size(11)
+          .text_color(t.muted)
+          .child(
+            [f.where, `round ${f.round}`, f.addressed ? `addressed in round ${f.addressedInRound}` : "open"]
+              .filter(Boolean)
+              .join(" · "),
+          ),
+      );
+  }
+
+  /** The Findings tab: the run's findings, blocking first, filterable by ticket; then the analyst's notes. */
+  findingsView(t: Theme, summaries: Summaries): El {
+    const st = this.runView?.state;
+    const prepNotes = this.prep ? findingRows(this.prep, summaries) : [];
+    const filter =
+      st && findingTickets(st).some((x) => x.key === this.findingsFilter) ? this.findingsFilter : null;
+    const rows = st ? findingRows(st, summaries, filter) : [];
+    return v_flex()
+      .id("findings")
+      .size_full()
+      .overflow_y_scrollbar()
+      .p(16)
+      .gap(8)
+      .child(section(t, this.runView ? `Run ${this.runView.number} findings (${rows.length})` : "Findings"))
+      .when(!!st && findingTickets(st).length > 0, (el: El) =>
+        el.child(
+          h_flex()
+            .gap(6)
+            .flex_wrap()
+            .child(
+              pill(t, "ff-all", "All", filter === null, (cx: El) => {
+                this.findingsFilter = null;
+                cx.notify();
+              }),
+            )
+            .children(
+              findingTickets(st as StateFile).map((x) =>
+                pill(
+                  t,
+                  `ff-${x.key}`,
+                  x.open ? `${x.key} (${x.open})` : x.key,
+                  filter === x.key,
+                  (cx: El) => {
+                    this.findingsFilter = x.key;
+                    cx.notify();
+                  },
+                ),
+              ),
+            ),
+        ),
+      )
+      .when(rows.length === 0, (el: El) =>
+        el.child(div().text_size(13).text_color(t.muted).child("No findings in this run.")),
+      )
+      .children(rows.map((f) => this.findingRow(t, f)))
+      .when(prepNotes.length > 0, (el: El) =>
+        el
+          .child(section(t, `Preparation (${prepNotes.length})`))
+          .children(prepNotes.map((f) => this.findingRow(t, f))),
+      );
+  }
+
+  /** One question with its state, answer and (when open) an Answer button. */
+  questionRow(t: Theme, q: QuestionRow): El {
+    return v_flex()
+      .id(`question-${q.id}`)
+      .gap(3)
+      .p(10)
+      .rounded(6)
+      .border(1)
+      .border_color(q.state === "open" ? t.blocked : t.border)
+      .bg(t.surface)
+      .opacity(q.state === "withdrawn" ? 0.5 : 1)
+      .child(
+        h_flex()
+          .gap(8)
+          .items_center()
+          .text_size(12)
+          .child(div().font_semibold().child(q.ticket))
+          .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(q.summary))
+          .child(
+            div()
+              .text_color(q.state === "open" ? t.blocked : t.muted)
+              .child(q.state),
+          ),
+      )
+      .child(div().text_size(11).text_color(t.dim).child(q.asker))
+      .child(div().text_size(13).child(q.question))
+      .when(q.answer !== null, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(`Answer: ${q.answer}${q.share ? " (shared with this ticket's agents)" : ""}`),
+        ),
+      )
+      .when(q.state === "open", (el: El) =>
+        el.child(
+          h_flex().child(
+            button(t, `answer-${q.id}`, "Answer", false, (cx: El) => this.openDialog(q.scope, q.id, cx)),
+          ),
+        ),
+      );
+  }
+
+  /** The Questions tab: the run's questions, open first, then the analyst's ("Preparation"). */
+  questionsView(t: Theme, summaries: Summaries): El {
+    const run = this.runView ? questionRows(this.runView.state, "run", summaries, this.runView.profiles) : [];
+    const prep = this.prep ? questionRows(this.prep, "prep", summaries) : [];
+    return v_flex()
+      .id("questions")
+      .size_full()
+      .overflow_y_scrollbar()
+      .p(16)
+      .gap(8)
+      .child(section(t, this.runView ? `Run ${this.runView.number} questions (${run.length})` : "Questions"))
+      .when(run.length === 0, (el: El) =>
+        el.child(div().text_size(13).text_color(t.muted).child("No questions in this run.")),
+      )
+      .children(run.map((q) => this.questionRow(t, q)))
+      .when(prep.length > 0, (el: El) =>
+        el
+          .child(section(t, `Preparation (${prep.length})`))
+          .children(prep.map((q) => this.questionRow(t, q))),
+      );
+  }
+
+  /** The question dialog: over everything, with the asker, the question, options and an answer box. */
+  dialogView(t: Theme, summaries: Summaries): El {
+    const d = this.dialog as { scope: "run" | "prep"; questionId: string };
+    const st = d.scope === "run" ? this.runView?.state : this.prep;
+    const q = st
+      ? questionRows(st, d.scope, summaries, this.runView?.profiles).find((x) => x.id === d.questionId)
+      : undefined;
+    const close = (cx: El) => {
+      this.dialog = null;
+      cx.notify();
+    };
+    const card = v_flex()
+      .id("question-dialog")
+      .w(540)
+      .p(18)
+      .gap(10)
+      .rounded(10)
+      .border(1)
+      .border_color(t.border)
+      .bg(t.popover)
+      .on_mouse_down("left", (_e: unknown, cx: El) => cx.stop_propagation());
+    const open = q?.state === "open";
+    return h_flex()
+      .id("dialog-backdrop")
+      .absolute()
+      .left(0)
+      .top(0)
+      .size_full()
+      .items_center()
+      .justify_center()
+      .bg("#000000aa")
+      .on_mouse_down("left", (_e: unknown, cx: El) => close(cx))
+      .child(
+        card
+          .child(
+            h_flex()
+              .gap(8)
+              .items_baseline()
+              .child(
+                div()
+                  .text_size(15)
+                  .font_semibold()
+                  .child(q?.ticket ?? "Question"),
+              )
+              .child(
+                div()
+                  .flex_1()
+                  .min_w(0)
+                  .truncate()
+                  .text_color(t.muted)
+                  .child(q?.summary ?? ""),
+              ),
+          )
+          .when(!!q, (el: El) =>
+            el.child(div().text_size(12).text_color(t.dim).child(`${q?.asker} asks`)).child(
+              div()
+                .p(10)
+                .rounded(6)
+                .bg(t.surface)
+                .border(1)
+                .border_color(t.border)
+                .text_size(13)
+                .child(q?.question ?? ""),
+            ),
+          )
+          .when(!q, (el: El) =>
+            el.child(div().text_size(13).text_color(t.muted).child("This question is no longer in the run.")),
+          )
+          .when(!!q && !open, (el: El) =>
+            el.child(
+              div()
+                .text_size(13)
+                .text_color(t.muted)
+                .child(`Already ${q?.state}${q?.answer ? `: ${q.answer}` : ""}.`),
+            ),
+          )
+          .when(open && (q?.options.length ?? 0) > 0, (el: El) =>
+            el.child(
+              h_flex()
+                .gap(6)
+                .flex_wrap()
+                .children(
+                  (q?.options ?? []).map((o, i) =>
+                    button(t, `opt-${i}`, o, false, (cx: El) => {
+                      this.answerBox.set_value(o);
+                      cx.notify();
+                    }),
+                  ),
+                ),
+            ),
+          )
+          .when(open, (el: El) =>
+            el
+              .child(
+                div()
+                  .h(30)
+                  .px(8)
+                  .rounded(6)
+                  .border(1)
+                  .border_color(t.input)
+                  .bg(t.surface)
+                  .child(Input.new(this.answerBox).h_full().w_full().text_size(13)),
+              )
+              .child(
+                h_flex()
+                  .id("share-toggle")
+                  .gap(8)
+                  .items_center()
+                  .text_size(12)
+                  .cursor_pointer()
+                  .on_click((_e: unknown, cx: El) => {
+                    this.share = !this.share;
+                    cx.notify();
+                  })
+                  .child(
+                    div()
+                      .w(14)
+                      .h(14)
+                      .rounded(3)
+                      .border(1)
+                      .border_color(t.input)
+                      .bg(this.share ? t.accent : t.surface)
+                      .text_color(t.accent_foreground)
+                      .text_size(10)
+                      .child(this.share ? "✓" : ""),
+                  )
+                  .child("Share this answer with other agents on this ticket"),
+              ),
+          )
+          .when(!!this.dialogError, (el: El) =>
+            el.child(
+              div()
+                .text_size(12)
+                .text_color(t.blocked)
+                .child(this.dialogError ?? ""),
+            ),
+          )
+          .child(
+            h_flex()
+              .gap(8)
+              .when(open, (el: El) =>
+                el.child(
+                  button(t, "send-answer", this.sending ? "Sending…" : "Send", this.sending, (cx: El) =>
+                    this.sendAnswer(cx),
+                  ),
+                ),
+              )
+              .child(button(t, "close-dialog", open ? "Cancel" : "Close", false, close)),
+          ),
+      );
   }
 
   /** Buttons for model actions; each runs its `collie ctl` command. */
@@ -989,8 +1613,8 @@ function toneBadge(t: Theme, name: Tone, label: string): El {
     .child(label);
 }
 
-/** The small marker under a graph node for one agent. */
-function execChip(t: Theme, key: string, e: ExecView): El {
+/** The small marker under a graph node: its newest agent (or the count), with a dot for its state. */
+function execChip(t: Theme, key: string, text: string, e: ExecView): El {
   return h_flex()
     .id(`chip-${key}-${e.id}`)
     .gap(3)
@@ -1004,7 +1628,7 @@ function execChip(t: Theme, key: string, e: ExecView): El {
         .rounded(3)
         .bg(tone(t, execTone(e))),
     )
-    .child(`dev ${e.attempt}${e.blocked ? " ⏸" : ""}`);
+    .child(text);
 }
 
 function section(t: Theme, label: string): El {

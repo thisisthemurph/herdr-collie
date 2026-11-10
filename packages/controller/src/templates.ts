@@ -57,6 +57,7 @@ export type BriefInput = {
   stacked: string;
   blockedBy: string;
   blocks: string;
+  findingsHeading?: string;
   findings: string;
   permissions: Profile["permissions"];
   timeoutMin: number;
@@ -87,12 +88,16 @@ export function taskBrief(i: BriefInput): string {
     comments: i.comments,
     repository: i.repository,
     worktree: i.worktree,
-    branch: i.branch,
+    branch_line:
+      i.kind === "analyse"
+        ? `${i.base} (detached and read-only: you are not working on a branch)`
+        : `${i.branch}, based on ${i.base}`,
     base: i.base,
     stacked: i.stacked,
     blocked_by: i.blockedBy,
     blocks: i.blocks,
     kind_instructions: render(kind, { ticket: i.ticket, base: i.base }).trimEnd(),
+    findings_heading: i.findingsHeading ?? "Findings to address",
     findings: i.findings,
     limits: limitsText(i.permissions),
     timeout_min: String(i.timeoutMin),

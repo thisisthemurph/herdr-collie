@@ -209,7 +209,7 @@ describe("run lifecycle", () => {
     });
     expect(await command(c, "ticket.investigate", { board_id: BOARD, tickets: ["PAY-101"] })).toMatchObject({
       ok: false,
-      error: { code: "unsupported", message: expect.stringContaining("Phase 5") },
+      error: { code: "unsupported", message: expect.stringContaining("can't start agents") },
     });
     expect(await command(c, "board.import", { board_id: BOARD, jql: "project = PAY" })).toMatchObject({
       ok: false,

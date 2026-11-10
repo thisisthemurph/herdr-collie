@@ -23,6 +23,7 @@ import {
   requireNoCycle,
 } from "./boards.ts";
 import { CommandError, type Controller, isoSeconds, type Ok } from "./controller.ts";
+import { reviewRound } from "./gate.ts";
 import { readJson, writeJsonAtomic } from "./home.ts";
 import { isExecutionFinal, isTicketFinal } from "./machines.ts";
 import { RunLog } from "./runlog.ts";
@@ -63,6 +64,15 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
     }
     case "ticket.pull_in":
       return pullIn(c, cmd.args.board_id, cmd.args.ticket);
+    case "ticket.set_workflow": {
+      const wf = cmd.args.workflow;
+      if (wf !== null && !existsSync(c.home.workflow(wf)))
+        throw new CommandError("not_found", `workflow ${wf} doesn't exist; save it first with workflow.save`);
+      // Takes effect in the next run: a running run keeps its snapshot.
+      return editTicket(c, cmd.args.board_id, cmd.args.ticket, (t) => {
+        t.workflow = wf;
+      });
+    }
     case "dep.override":
     case "dep.restore": {
       const r = depOverride(c, cmd.command === "dep.override", cmd.args);
@@ -101,7 +111,7 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
     case "ticket.cancel":
       return ticketCancel(c, cmd.id, cmd.args);
     case "exec.cancel": {
-      const rl = c.requireRun(cmd.args.run_id);
+      const rl = c.requireLog(cmd.args.run_id);
       const e = rl.state.executions[cmd.args.execution_id];
       if (!e)
         throw new CommandError("not_found", `execution ${cmd.args.execution_id} is not in run ${rl.id}`);
@@ -111,7 +121,8 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
       return c.killTerminals(rl, [cmd.args.execution_id], "cancelled by a person").then(() => ({}));
     }
     case "question.answer": {
-      const rl = c.requireRun(cmd.args.run_id);
+      // A board id names the board's preparation log: the analyst's questions are answered here too.
+      const rl = c.requireLog(cmd.args.run_id);
       const q = rl.state.questions[cmd.args.question_id];
       if (!q) throw new CommandError("not_found", `question ${cmd.args.question_id} is not in run ${rl.id}`);
       if (q.state !== "open")
@@ -132,7 +143,7 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
           { ticket: q.ticket, cause: cmd.id, source: "human" },
         ),
       ]);
-      // DECISION: delivery to the agent (hc send when its turn has ended) arrives in Phase 4.
+      // Delivery to the agent happens when its turn has ended (Agents.deliverAnswer).
       return { delivered: false };
     }
     case "board.import":
@@ -140,7 +151,7 @@ export function handleCommand(c: Controller, cmd: Command): Ok | Promise<Ok> {
     case "board.refresh":
       return boardRefresh(c, cmd.args.board_id, cmd.id);
     case "ticket.investigate":
-      throw unsupported("ticket.investigate (the requirements analyst)", 5);
+      return ticketInvestigate(c, cmd.args);
     case "ticket.retry":
       return ticketRetry(c, cmd.id, cmd.args);
     case "pr.mark_ready":
@@ -356,30 +367,113 @@ async function ticketCancel(c: Controller, cmdId: string, a: Args<"ticket.cancel
   return {};
 }
 
-/** ticket.retry: a ticket held for a failed execution gets a fresh developer, at attempt 1. */
+/** DECISION: the analyst's profile is the one called `requirements-analyst`. */
+export const ANALYST_PROFILE = "requirements-analyst";
+
+/** ticket.investigate: an analyst reads each ticket and the code, asks its questions, and says when it is ready. */
+function ticketInvestigate(c: Controller, a: Args<"ticket.investigate">): Ok {
+  if (!c.agents) throw new CommandError("unsupported", "this controller can't start agents");
+  const board = c.loadBoard(a.board_id);
+  for (const key of a.tickets) {
+    const t = board.tickets[key];
+    if (!t) throw new CommandError("not_found", `${key} is not on board ${board.id}`);
+    if (!t.on_board)
+      throw new CommandError(
+        "invalid_state",
+        `${key} is an outside blocker, not a ticket on the board; pull it in first`,
+      );
+  }
+  const path = c.home.profile(ANALYST_PROFILE);
+  if (!existsSync(path))
+    throw new CommandError(
+      "not_found",
+      `profile ${ANALYST_PROFILE} doesn't exist; save it with profile.save (role analyst)`,
+    );
+  const p = validateProfile(readJson(path));
+  if (!p.ok)
+    throw new CommandError(
+      "internal",
+      `profile ${ANALYST_PROFILE} is invalid on disk: ${formatIssues(p.issues)}`,
+    );
+  if (p.value.role !== "analyst")
+    throw new CommandError(
+      "invalid_state",
+      `profile ${ANALYST_PROFILE} has the role ${p.value.role}, not analyst`,
+    );
+  const rl = c.prepLog(board.id);
+  rl.run.snapshot.profiles[ANALYST_PROFILE] = p.value; // the profile as it is now
+  const busy = a.tickets.filter((k) =>
+    Object.values(rl.state.executions).some(
+      (e) => e.ticket === k && e.kind === "analyse" && !isExecutionFinal(e.state),
+    ),
+  );
+  if (busy.length)
+    throw new CommandError(
+      "invalid_state",
+      `${busy.join(", ")} ${busy.length > 1 ? "are" : "is"} already being investigated`,
+    );
+  const fresh = c.loadBoard(board.id);
+  for (const key of a.tickets) (fresh.tickets[key] as { preparation: string }).preparation = "investigating";
+  c.saveBoard(fresh);
+  const ids = a.tickets.map((key) =>
+    (c.agents as NonNullable<typeof c.agents>).launch(rl, {
+      ticket: key,
+      kind: "analyse",
+      profile: ANALYST_PROFILE,
+      round: 1,
+      attempt: 1,
+    }),
+  );
+  return { execution_ids: ids };
+}
+
+/**
+ * ticket.retry: a ticket held for a failed execution gets that work started again at attempt 1
+ * (a developer, a reviewer or a remediation, whichever failed). A ticket held at the round cap
+ * gets one more remediation round.
+ */
 function ticketRetry(c: Controller, cmdId: string, a: Args<"ticket.retry">): Ok {
   const rl = c.requireRun(a.run_id);
   const t = rl.state.tickets[a.ticket];
   if (!t) throw new CommandError("not_found", `${a.ticket} is not in run ${rl.id}`);
   if (!c.agents) throw new CommandError("unsupported", "this controller can't start agents");
-  const held = t.attention.find((x) => x.kind === "execution_failed");
-  if (t.state !== "needs_input" || !held)
+  const failed = t.attention.filter((x) => x.kind === "execution_failed");
+  const capped = t.attention.some((x) => x.kind === "round_cap");
+  if (t.state !== "needs_input" || (failed.length === 0 && !capped))
     throw new CommandError(
       "invalid_state",
-      `${a.ticket} is ${t.state}${t.state === "needs_input" ? " and isn't waiting on a failed execution; answer its question instead" : ""}; only a ticket held for a failed execution can be retried`,
+      `${a.ticket} is ${t.state}${t.state === "needs_input" ? " and isn't waiting on a failed execution or the round cap; answer its question instead" : ""}; only a ticket held for a failed execution or the round cap can be retried`,
     );
   if (rl.state.status !== "running")
     throw new CommandError("invalid_state", `run ${rl.id} is ${rl.state.status}; resume it first`);
-  c.emit(rl, [
-    c.event(
-      rl.id,
-      "ticket.attention_removed",
-      { kind: "execution_failed" },
-      { ticket: a.ticket, cause: cmdId, source: "human" },
+  const o = { ticket: a.ticket, cause: cmdId, source: "human" as const };
+  const resume = t.resume_state;
+  const events = [
+    ...failed.map((x) =>
+      c.event(rl.id, "ticket.attention_removed", { kind: "execution_failed", id: x.id }, o),
     ),
-    c.ticketTo(rl, a.ticket, "in_progress", "retried by a person", { cause: cmdId, source: "human" }),
-  ]);
-  return { execution_id: c.agents.launch(rl, a.ticket, 1) };
+    ...(capped ? [c.event(rl.id, "ticket.attention_removed", { kind: "round_cap" }, o)] : []),
+  ];
+  const left = t.attention.filter((x) => x.kind === "question");
+  if (left.length === 0 && resume) events.push(c.ticketTo(rl, a.ticket, resume, "retried by a person", o));
+  c.emit(rl, events);
+
+  const ids: string[] = [];
+  for (const x of failed) {
+    const e = x.id ? rl.state.executions[x.id] : undefined;
+    if (!e) continue;
+    ids.push(
+      c.agents.launch(rl, { ticket: a.ticket, kind: e.kind, profile: e.profile, round: e.round, attempt: 1 }),
+    );
+  }
+  if (capped) {
+    // One more round than the workflow allows: the remediation starts now, from the round the
+    // reviewers last judged.
+    const round = reviewRound(c.agents.views(rl, a.ticket));
+    const id = c.agents.startRemediation(rl, a.ticket, round);
+    if (id) ids.push(id);
+  }
+  return { execution_id: ids[0] ?? null, execution_ids: ids };
 }
 
 async function runCancel(c: Controller, cmdId: string, a: Args<"run.cancel">): Promise<Ok> {

@@ -36,7 +36,7 @@ Three actors act on a run: agents report through the CLI, the person steers thro
 | Start a run | `collie ctl run start` | Snapshots config, leases tickets, begins scheduling |
 | Pause / resume a run | `collie ctl run pause` / `resume` | Pause stops new dispatch; running agents continue |
 | Cancel a run | `collie ctl run cancel` | Kills agents, releases leases, run ends |
-| Answer a question | `collie ctl answer` | Answer delivered to the waiting agent |
+| Answer a question | `collie ctl question.answer` | Answer delivered to the waiting agent |
 | Cancel / retry an execution | `collie ctl exec cancel` / `retry` | Kills it, or starts a new attempt |
 | Override a dependency | `collie ctl dep override` | Recorded; ticket readiness recalculated |
 | Exclude a ticket | `collie ctl ticket exclude` | Ticket skipped; downstream stays blocked |
@@ -63,7 +63,10 @@ Agent inboxes are append-only JSONL files, one per execution, written only by th
   workflows/<workflow-id>.json # reusable workflows
   boards/<board-id>/
     board.json                 # config, tickets, overrides
-    prep/<exec-id>/            # analyst executions (same files as below)
+    prep/                      # board preparation: the requirements analyst
+      events.jsonl             # its log, kept like a run's (controller events carry the board id as run_id)
+      state.json               # materialised state: executions, questions, findings
+      <exec-id>/               # analyst executions (same files as below)
   control/
     pending/<cmd-id>.json      # written by `collie ctl`
     done/<cmd-id>.json         # moved here by controller, with result
@@ -194,7 +197,7 @@ The controller's `events.jsonl` is the run's single source of truth; `state.json
 
 1. The agent runs `collie ask "..."`. The CLI appends an `ask` event, whose id becomes the question id, and prints: *Question 01JC8Z7Q… recorded. End your turn now; the answer will arrive as your next message.*
 2. The controller emits `question.opened`, moves the execution and ticket to Needs input, and the mod raises a Herdr notification.
-3. The person answers in the mod, which runs `collie ctl answer <question-id> --text "..."`.
+3. The person answers in the mod, which runs `collie ctl question.answer` with the question id and the text.
 4. The controller emits `question.answered`, then waits until the agent's turn has ended (`idle` or `done`, see *Talking to an agent*), so it never types into a working agent.
 5. It sends the answer with `hc send`, formatted as `[collie] Answer to your question <last six characters of the id>: ... Continue the task.`, emits `question.delivered`, and moves the execution back to Working.
 
@@ -215,7 +218,7 @@ hc run --bg --json --no-parent --no-notify --name <exec-slug> --cwd <worktree> \
 - `--no-notify`: otherwise hc types notes about the child into the controller's own terminal.
 - Never put a secret in this command line or its environment: the environment is readable by the same user (`ps -E`).
 - A terminal is named `<ticket>-<last six characters of the execution id>`, lower case, within hc's 32 characters.
-- **Trust dialog (found against real Claude Code).** A new worktree makes Claude Code ask whether to trust the folder. hc reports the agent `idle`, not `blocked`, so the controller reads the screen (`hc read --lines 0`) once the agent has been at turn 0 for 10 seconds; if it shows the dialog, it logs `execution.agent_blocked` (`permission`) and does not start the 60-second timeout. Collie doesn't answer the dialog: the person does, in the agent's terminal.
+- **Trust dialog (found against real Claude Code).** A new worktree makes Claude Code ask whether to trust the folder. hc reports the agent `idle`, not `blocked`, so the controller reads the screen (`hc read --lines 0`) once the agent has been at turn 0 for 10 seconds; if it shows the dialog, it logs `execution.agent_blocked` (`permission`) and does not start the 60-second timeout. Collie doesn't answer the dialog: the person does, in the agent's terminal. Trusting the parent folder (`~/.herdr/worktrees`) in Claude Code's settings does **not** stop the dialog for a new worktree; Claude Code remembers trust once per repository, so the dialog appears on a repository's first run. Time spent waiting on it doesn't count against the 60 seconds.
 - The execution moves to `working` only once `hc get` shows `turn >= 1` or `working`. An agent still at `idle`, turn 0, 60 seconds after launch means its first message never arrived: fail the execution as `tooling`, retryable.
 
 **Talking to an agent**
@@ -535,15 +538,16 @@ A successful reply is `{"v": 1, "id": …, "ok": true, "result": {…}}`.
 | `board.update_settings` | `board_id`, partial `settings` | — |
 | `ticket.set_preparation` | `board_id`, `ticket`, `preparation` | — |
 | `ticket.pull_in` | `board_id`, `ticket` | `added` |
-| `ticket.investigate` | `board_id`, `tickets` | `execution_ids` |
+| `ticket.set_workflow` | `board_id`, `ticket`, `workflow` (a workflow id, or null for the board default) | — |
+| `ticket.investigate` | `board_id`, `tickets` | `execution_ids`. Starts a requirements analyst on each ticket (see *Requirements analyst*) |
 | `dep.override` / `dep.restore` | `board_id`, `blocker`, `blocked` | — |
 | `profile.save` / `workflow.save` | the whole object | — |
 | `run.start` | `board_id`, optional `carry_over_from` | `run_id` |
 | `run.pause` / `run.resume` / `run.cancel` | `run_id`, optional `reason` | — |
 | `run.delete` | `run_id` | — |
-| `ticket.cancel` / `ticket.retry` | `run_id`, `ticket` | `execution_id` for retry. Retry applies to a ticket held for `execution_failed`: it clears that and starts a developer at attempt 1 |
-| `exec.cancel` | `run_id`, `execution_id` | — |
-| `question.answer` | `run_id`, `question_id`, `answer`, `share_with_ticket` | — |
+| `ticket.cancel` / `ticket.retry` | `run_id`, `ticket` | `execution_id` and `execution_ids` for retry. Retry applies to a ticket held for `execution_failed`, which it clears by starting the failed work again (a developer, a reviewer or a remediation, whichever failed) at attempt 1, or held at the `round_cap`, where it starts one more remediation round |
+| `exec.cancel` | `run_id`, `execution_id` | — (`run_id` may be a board id for an analyst's execution) |
+| `question.answer` | `run_id`, `question_id`, `answer`, `share_with_ticket` | `delivered: false`; the answer reaches the agent when its turn has ended. For an analyst's question `run_id` is the **board** id |
 | `pr.mark_ready` | `run_id`, `ticket` | — |
 
 Error codes: `invalid_args`, `not_found`, `invalid_state`, `lease_conflict`, `cycle_detected`, `unsupported`, `upstream_error` (Jira or Bitbucket), `internal`.
@@ -626,11 +630,34 @@ Once a ticket leaves `ready`, blocker regressions are logged as warnings but don
 
 ## Phase 4 rules the controller applies
 
-- **Workflow is developer-only** until Phase 5: reviewers in a snapshot are ignored, and a ticket whose developer is `done` goes `in_progress → delivering → completed` at once. Delivery (push, PR, Jira) is Phase 6.
+- **A ticket that passes its gate** (or has no reviewers) goes `delivering → completed` at once. Delivery (push, PR, Jira) is Phase 6.
 - **Branch and base.** The branch is the lower-cased key plus a slug of the summary (`pay-102-payment-api`), in `~/.herdr/worktrees/<repo>/<branch>`. A ticket whose blockers completed in the same run is based on the first one's branch, and merges the others in; otherwise on the board's default branch (a local branch; nothing is fetched).
 - **Done verification.** Besides the listed commits, the controller checks they are on the ticket branch, that the branch has commits beyond `base`, and that the worktree is clean. A rejected `done` is explained to the agent with `hc send` at its next turn end.
 - **Terminals.** Cancelled executions are killed at once; a timed-out or never-started one is killed; a finished ticket's executions are killed when it completes. Each kill is logged as `execution.killed` while the run is live, and in `controller.log` after it has ended.
 - **Dispatch limits** are the board's `max_tickets` (tickets in flight) and `max_agents` (live agents), per run.
+
+## Phase 5 rules the controller applies
+
+**Reviews.** When a developer's `done` is accepted and the workflow has reviewers, the ticket goes to `reviewing` and every reviewer of the round starts in parallel, in the developer's worktree (read-only by their profile), as `review` executions with the round number.
+- **The gate waits for every reviewer of the round**, required and optional. Only required reviewers' verdicts decide it. (DECISION: waiting for optional ones keeps their findings complete for the remediation.)
+- A required reviewer that ends without a verdict and can't retry holds the ticket (`execution_failed`); an optional one is skipped.
+- `max_agents` limits reviewers too: a reviewer waits until there is a free agent slot. A retry replaces an agent that died, so it needs none.
+
+**Remediation and rounds.**
+- Any required `request_changes` starts a remediation while fewer than `max_remediation_rounds` remediations have completed. (DECISION: "capped per workflow" counts remediation rounds, so the default of 2 allows two.) At the cap the ticket gets `round_cap`; `ticket.retry` starts one more remediation.
+- A remediation is a developer execution of kind `remediate` whose `round` is the review round it answers. When it completes the ticket goes back to `reviewing`, and the review round is one more than the highest completed remediation round.
+- Only the reviewers that asked for changes in the previous round run again (DECISION: an optional reviewer that asked for changes is checked again too).
+- Findings are **addressed** when a remediation that saw them completes: `addressed_in_round` is set by the reducer, with no event of its own. `collie show findings` lists a ticket's open (unaddressed) findings.
+- A remediation's brief lists the ticket's open findings, blocking first, with a pointer to `collie show findings`. A reviewer in round 2 or later gets the last round's findings in its brief, to check they were addressed.
+
+**Questions.** `question.answer` records the answer. As soon as the agent's turn has ended (`idle` or `done`), the controller types `[collie] Answer to your question <last six characters of the id>: <answer on one line> Continue the task.` with `hc send` (without `HC_TERMINAL_ID`), then logs `question.delivered`, returns the execution to `working`, and returns the ticket to its `resume_state` when its attention list is empty. (DECISION: newlines in an answer become spaces, because a newline would submit the message early.) An answer that has been recorded but not delivered survives a controller restart: delivery is decided from the state each tick. Answers shared with the ticket (`share_with_ticket`) go into later briefs, from the preparation as well as from earlier rounds.
+
+**Workflows.** `ticket.set_workflow` sets the workflow a ticket uses from the next run on (the board's `settings.workflow` is the default). The controller saves the profiles `developer`, `security-reviewer`, `backend-reviewer`, `frontend-reviewer` and `requirements-analyst` and the workflows `standard-feature` (security and backend required, frontend optional, two remediation rounds) and `small-bug-fix` (no reviewers) on start, only when they don't exist.
+
+**Requirements analyst.** `ticket.investigate` starts an analyst per ticket under `boards/<board-id>/prep/`, as its own log laid out like a run's. It is not a run: no leases, no `run.json`. Its controller events carry the board id as `run_id`; the analyst's own events carry `run_id: null`, and `COLLIE_RUN_ID` is empty. The analyst's terminal is labelled `collie.board=<board-id>` instead of `collie.run`.
+- The analyst works in a detached, read-only worktree of the board's default branch, `~/.herdr/worktrees/<repo>/prep-<ticket>`, with the profile `requirements-analyst`.
+- The ticket's `preparation` follows it: `investigating` while it works, `needs_input` while a question of it is open, `ready` when its `done` is accepted, `unreviewed` when it ends without one (after its attempts). A person who sets another preparation meanwhile (for example `excluded`) is left alone.
+- Its questions are answered with `question.answer`, giving the board id as `run_id`; answers shared with the ticket go into the developer's brief. Its `finding`s (design suggestions) stay in the preparation log for the Board setup screen.
 
 ## Retention
 

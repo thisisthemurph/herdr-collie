@@ -1,6 +1,6 @@
 // `collie ctl` control commands and their replies (docs/protocol.md, "Control commands").
 
-import { nonEmpty, PREPARATION_STATES, schemaVersion, ticketKey, timestamp, ulid } from "./common.ts";
+import { nonEmpty, PREPARATION_STATES, schemaVersion, slug, ticketKey, timestamp, ulid } from "./common.ts";
 import { jiraLink, partialBoardSettings, profile, repoLink, workflow } from "./config.ts";
 import {
   anyObject,
@@ -9,6 +9,7 @@ import {
   type Infer,
   join,
   lit,
+  nullable,
   obj,
   oneOf,
   opt,
@@ -46,6 +47,8 @@ export const COMMAND_ARGS = {
     preparation: oneOf(PREPARATION_STATES),
   }),
   "ticket.pull_in": obj({ board_id: ulid, ticket: ticketKey }),
+  // Phase 5: the workflow one ticket uses from the next run on; null means the board default.
+  "ticket.set_workflow": obj({ board_id: ulid, ticket: ticketKey, workflow: nullable(slug) }),
   "ticket.investigate": obj({ board_id: ulid, tickets: arr(ticketKey, { min: 1 }) }),
   "dep.override": depArgs,
   "dep.restore": depArgs,

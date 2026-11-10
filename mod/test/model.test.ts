@@ -4,13 +4,24 @@ import { join } from "node:path";
 import type { Board } from "@collie/schema";
 import { formatIssues, validateCommand } from "@collie/schema";
 import {
+  alerts,
+  answerAction,
   boardModel,
   describeReply,
   excludeAction,
+  execChipLabel,
   execLine,
   externalActions,
+  findingRows,
+  findingTickets,
+  investigateAction,
+  investigateTargets,
+  needsYou,
   nextPreparation,
+  nextWorkflow,
   parseImport,
+  prepModel,
+  questionRows,
   type RunView,
   runModel,
   startAction,
@@ -266,9 +277,11 @@ describe("a run in progress", () => {
     ]);
     expect(m.tickets["PAY-2"]?.attention).toEqual(["its agent failed with no attempts left"]);
     expect(m.tickets["PAY-1"]?.executions.map((e) => [e.outcome, execLine(e)])).toEqual([
-      ["Added the table", "attempt 1 · completed · t4"],
+      ["Added the table", "Developer, development · attempt 1 · completed · t4"],
     ]);
-    expect(m.tickets["PAY-2"]?.executions.map(execLine)).toEqual(["attempt 2 · failed · t5 · nudged 2×"]);
+    expect(m.tickets["PAY-2"]?.executions.map(execLine)).toEqual([
+      "Developer, development · attempt 2 · failed · t5 · nudged 2×",
+    ]);
   });
 
   test("a blocked agent says what it waits for", () => {
@@ -343,5 +356,407 @@ describe("a run in progress", () => {
 
   test("no run, no model", () => {
     expect(runModel(null)).toBeNull();
+  });
+});
+
+describe("questions, findings and the Needs you banner (Phase 5)", () => {
+  const RUN = "01JC8YQ0000000000000000001";
+  const BOARD = "01JC8XW0000000000000000001";
+  const E_DEV = "01JC8Z1A000000000000000001";
+  const E_SEC = "01JC8Z1A000000000000000002";
+  const Q1 = "01JC8Z7Q000000000000000001";
+  const Q2 = "01JC8Z7Q000000000000000002";
+  const F = (n: number) => `01JC8Z9F00000000000000000${n}`;
+  const summaries = { "PAY-1": "Add the table", "PAY-2": "Expose the API" };
+
+  const view = (status: RunView["status"] = "running"): RunView => ({
+    id: RUN,
+    number: 4,
+    status,
+    boardId: BOARD,
+    profiles: { "security-reviewer": "Security reviewer" },
+    state: {
+      v: 1,
+      run_id: RUN,
+      last_event_id: null,
+      status,
+      leases: [],
+      tickets: {
+        "PAY-1": {
+          state: "reviewing",
+          resume_state: null,
+          attention: [],
+          round: 1,
+          branch: "pay-1",
+          base: "main",
+          executions: [E_DEV, E_SEC],
+          pr: null,
+        },
+        "PAY-2": {
+          state: "in_progress",
+          resume_state: null,
+          attention: [],
+          round: 1,
+          branch: null,
+          base: null,
+          executions: [],
+          pr: null,
+        },
+      },
+      executions: {
+        [E_DEV]: {
+          ticket: "PAY-1",
+          profile: "developer",
+          kind: "develop",
+          state: "completed",
+          attempt: 1,
+          round: 1,
+          terminal: "t1",
+          nudges: 0,
+          started_at: null,
+          ended_at: null,
+          result: { summary: "Done", commits: ["a1b2c3d"] },
+        },
+        [E_SEC]: {
+          ticket: "PAY-1",
+          profile: "security-reviewer",
+          kind: "review",
+          state: "working",
+          attempt: 1,
+          round: 1,
+          terminal: "t2",
+          nudges: 0,
+          started_at: null,
+          ended_at: null,
+          result: null,
+        },
+      },
+      questions: {},
+      findings: [],
+      inbox_offsets: {},
+    },
+  });
+
+  /** The run with something of every kind that needs a person. */
+  const needy = (): RunView => {
+    const v = view();
+    const sec = v.state.executions[E_SEC];
+    if (!sec) throw new Error("fixture");
+    v.state.questions[Q1] = {
+      execution_id: E_SEC,
+      ticket: "PAY-1",
+      question: "Should the endpoint return 404 or 410?",
+      options: ["404", "410"],
+      state: "open",
+      answer: null,
+      share_with_ticket: false,
+    };
+    v.state.questions[Q2] = {
+      execution_id: E_SEC,
+      ticket: "PAY-1",
+      question: "Old one",
+      options: [],
+      state: "delivered",
+      answer: "yes",
+      share_with_ticket: true,
+    };
+    const t2 = v.state.tickets["PAY-2"];
+    if (!t2) throw new Error("fixture");
+    t2.state = "needs_input";
+    t2.attention = [{ kind: "round_cap" }];
+    return v;
+  };
+
+  test("the banner lists open questions and held tickets with their actions", () => {
+    const items = needsYou(needy(), summaries);
+    expect(items.map((i) => [i.kind, i.ticket, i.actions.map((a) => a.label)])).toEqual([
+      ["question", "PAY-1", ["Answer"]],
+      ["round_cap", "PAY-2", ["Retry (one more round)"]],
+    ]);
+    expect(items[0]?.reason).toBe(
+      "Security reviewer, review round 1 asks: Should the endpoint return 404 or 410?",
+    );
+    expect(items[0]?.summary).toBe("Add the table");
+    // An answered question no longer holds anyone.
+    expect(items.some((i) => i.key === `question:${Q2}`)).toBe(false);
+  });
+
+  test("a failed agent offers Retry and Watch terminal; a blocked agent offers Watch terminal", () => {
+    const v = view();
+    const dev = v.state.executions[E_DEV];
+    const sec = v.state.executions[E_SEC];
+    const t1 = v.state.tickets["PAY-1"];
+    if (!dev || !sec || !t1) throw new Error("fixture");
+    dev.state = "failed";
+    dev.result = { reason: "no report after 2 nudges", category: "tooling", retryable: true };
+    t1.attention = [{ kind: "execution_failed", id: E_DEV }];
+    sec.agent_blocked = { kind: "permission", message: "approve Bash: go test" };
+    const items = needsYou(v, summaries);
+    expect(items.map((i) => [i.kind, i.actions.map((a) => a.label)])).toEqual([
+      ["execution_failed", ["Retry", "Watch terminal"]],
+      ["agent_blocked", ["Watch terminal"]],
+    ]);
+    expect(items[1]?.reason).toBe(
+      "Security reviewer, review round 1 is waiting for permission: approve Bash: go test",
+    );
+  });
+
+  test("the banner is empty when nothing needs a person, and for finished tickets", () => {
+    expect(needsYou(view())).toEqual([]);
+    const v = needy();
+    const t2 = v.state.tickets["PAY-2"];
+    if (!t2) throw new Error("fixture");
+    t2.state = "cancelled";
+    expect(needsYou(v).map((i) => i.kind)).toEqual(["question"]);
+  });
+
+  test("every banner and inspector command is one the controller accepts", () => {
+    const m = runModel(needy(), summaries);
+    if (!m) throw new Error("no model");
+    const items = needsYou(needy(), summaries);
+    const ctls = items.flatMap((i) => i.actions).flatMap((a) => (a.type === "ctl" ? [a] : []));
+    expect(ctls.length).toBeGreaterThan(0);
+    const answer = answerAction(RUN, Q1, " 404 ", true);
+    if ("error" in answer) throw new Error(answer.error);
+    expect(answer.action.args).toEqual({
+      run_id: RUN,
+      question_id: Q1,
+      answer: "404",
+      share_with_ticket: true,
+    });
+    const cmds = [
+      ...ctls.map((a) => ({ command: a.command, args: a.args })),
+      { command: answer.action.command, args: answer.action.args },
+      ...ticketRunActions(RUN, m.tickets["PAY-2"] as never),
+      investigateAction(BOARD, ["PAY-1", "PAY-2"]),
+      {
+        command: "ticket.set_workflow",
+        args: { board_id: BOARD, ticket: "PAY-1", workflow: "small-bug-fix" },
+      },
+      { command: "ticket.set_workflow", args: { board_id: BOARD, ticket: "PAY-1", workflow: null } },
+      {
+        command: "board.update_settings",
+        args: { board_id: BOARD, settings: { workflow: "standard-feature" } },
+      },
+    ];
+    for (const a of cmds) {
+      const r = validateCommand({
+        v: 1,
+        id: "01JC9A0C000000000000000001",
+        command: a.command,
+        at: "2026-11-09T10:00:00Z",
+        args: a.args,
+      });
+      if (!r.ok) throw new Error(`${a.command}: ${formatIssues(r.issues)}`);
+    }
+  });
+
+  test("an empty answer is refused before anything is sent", () => {
+    expect(answerAction(RUN, Q1, "   ", false)).toEqual({
+      error: "Type an answer, or pick one of the options.",
+    });
+  });
+
+  test("questions: open first, with who asked", () => {
+    const rows = questionRows(needy().state, "run", summaries, { "security-reviewer": "Security reviewer" });
+    expect(rows.map((r) => [r.id, r.state, r.asker])).toEqual([
+      [Q1, "open", "Security reviewer, review round 1"],
+      [Q2, "delivered", "Security reviewer, review round 1"],
+    ]);
+    // Without a name from the run's snapshot, the profile id is made readable.
+    expect(questionRows(needy().state, "prep")[0]?.asker).toBe(
+      "Security-reviewer, review round 1".replace("-", " "),
+    );
+  });
+
+  test("findings: blocking and open first, addressed last, filterable by ticket", () => {
+    const v = view();
+    const base = { execution_id: E_SEC, round: 1, file: "src/a.ts", line: 10 };
+    v.state.findings = [
+      {
+        ...base,
+        id: F(1),
+        ticket: "PAY-1",
+        severity: "low",
+        blocking: false,
+        title: "Nit",
+        addressed_in_round: null,
+      },
+      {
+        ...base,
+        id: F(2),
+        ticket: "PAY-1",
+        severity: "high",
+        blocking: true,
+        title: "SQL injection",
+        addressed_in_round: 2,
+      },
+      {
+        ...base,
+        id: F(3),
+        ticket: "PAY-2",
+        severity: "medium",
+        blocking: true,
+        title: "No auth",
+        addressed_in_round: null,
+        line: undefined,
+      },
+    ];
+    const rows = findingRows(v.state, summaries);
+    expect(rows.map((r) => r.title)).toEqual(["No auth", "Nit", "SQL injection"]);
+    expect(rows[0]).toMatchObject({
+      where: "src/a.ts",
+      blocking: true,
+      addressed: false,
+      summary: "Expose the API",
+    });
+    expect(rows[2]).toMatchObject({ where: "src/a.ts:10", addressed: true, addressedInRound: 2 });
+    expect(findingRows(v.state, summaries, "PAY-1").map((r) => r.title)).toEqual(["Nit", "SQL injection"]);
+    expect(findingTickets(v.state)).toEqual([
+      { key: "PAY-1", open: 1 },
+      { key: "PAY-2", open: 1 },
+    ]);
+    // The inspector gets only a ticket's open findings, and its open questions.
+    const m = runModel({ ...v, state: needy().state }, summaries);
+    expect(m?.tickets["PAY-1"]?.openQuestions.map((q) => q.id)).toEqual([Q1]);
+    const m2 = runModel(v, summaries);
+    expect(m2?.tickets["PAY-1"]?.openFindings.map((f) => f.title)).toEqual(["Nit"]);
+  });
+
+  test("states and executions read sensibly for the new kinds", () => {
+    const m = runModel(needy(), summaries);
+    if (!m) throw new Error("no model");
+    expect(m.tickets["PAY-1"]).toMatchObject({ label: "Reviewing", tone: "working" });
+    expect(m.tickets["PAY-2"]).toMatchObject({
+      label: "Needs you",
+      tone: "blocked",
+      attentionKinds: ["round_cap"],
+    });
+    expect(m.tickets["PAY-1"]?.executions.map(execLine)).toEqual([
+      "Developer, development · attempt 1 · completed · t1",
+      "Security reviewer, review round 1 · attempt 1 · working · t2",
+    ]);
+    expect(execChipLabel(m.tickets["PAY-1"] as never).text).toBe("rev r1");
+    expect(ticketRunActions(RUN, m.tickets["PAY-2"] as never).map((a) => a.label)).toEqual([
+      "Retry (one more round)",
+      "Cancel ticket",
+    ]);
+  });
+
+  describe("alerts", () => {
+    test("opening the mod announces nothing, even with questions waiting", () => {
+      expect(alerts(null, needy(), summaries)).toEqual([]);
+    });
+
+    test("a new question, new attention and a new blocked agent are each announced once", () => {
+      const before = view();
+      const a = alerts(before, needy(), summaries);
+      expect(a.map((x) => [x.key, x.title, x.level])).toEqual([
+        [`question:${Q1}`, "PAY-1 needs you", "warning"],
+        ["attention:PAY-2:round_cap", "PAY-2 needs you", "warning"],
+      ]);
+      expect(a[0]?.body).toContain("Should the endpoint return 404 or 410?");
+      // Same view again: nothing new.
+      expect(alerts(needy(), needy(), summaries)).toEqual([]);
+      const blocked = view();
+      const sec = blocked.state.executions[E_SEC];
+      if (!sec) throw new Error("fixture");
+      sec.agent_blocked = { kind: "question", message: "Allow?" };
+      expect(alerts(view(), blocked, summaries).map((x) => x.key)).toEqual([`blocked:${E_SEC}:question`]);
+    });
+
+    test("a run that ends is announced once; a run already over is not", () => {
+      const done = view("completed");
+      const t1 = done.state.tickets["PAY-1"];
+      if (!t1) throw new Error("fixture");
+      t1.state = "completed";
+      const a = alerts(view(), done, summaries);
+      expect(a).toEqual([
+        {
+          key: `run:${RUN}:completed`,
+          title: "Run 4 is complete",
+          body: "1 of 2 tickets done.",
+          level: "success",
+        },
+      ]);
+      expect(alerts(done, done, summaries)).toEqual([]);
+      expect(alerts(view("paused"), view("cancelled"), summaries)[0]).toMatchObject({
+        title: "Run 4 was cancelled",
+        level: "info",
+      });
+    });
+
+    test("another run is a fresh start, not a flood of alerts", () => {
+      const other = { ...needy(), id: "01JC8YQ0000000000000000002" };
+      expect(alerts(view(), other, summaries)).toEqual([]);
+    });
+  });
+
+  describe("Board setup: the analyst and workflows", () => {
+    test("a ticket's workflow cycles through the default (null) and each workflow", () => {
+      const ids = ["standard-feature", "small-bug-fix"];
+      expect(nextWorkflow(null, ids)).toBe("standard-feature");
+      expect(nextWorkflow("standard-feature", ids)).toBe("small-bug-fix");
+      expect(nextWorkflow("small-bug-fix", ids)).toBeNull();
+      expect(nextWorkflow("gone", ids)).toBeNull();
+      expect(nextWorkflow(null, [])).toBeNull();
+    });
+
+    test("Investigate all targets only unreviewed tickets", () => {
+      expect(
+        investigateTargets([
+          { key: "PAY-1", preparation: "unreviewed" },
+          { key: "PAY-2", preparation: "ready" },
+          { key: "PAY-3", preparation: "needs_input" },
+          { key: "PAY-4", preparation: "unreviewed" },
+        ]),
+      ).toEqual(["PAY-1", "PAY-4"]);
+      expect(investigateAction(BOARD, ["PAY-1"]).label).toBe("Investigate");
+    });
+
+    test("the analyst's open questions and notes group by ticket, answered with the board id", () => {
+      const board = fixture("single");
+      const key = Object.keys(board.tickets)[0] as string;
+      const prep = view().state;
+      const exec = {
+        ...(prep.executions[E_SEC] as never as object),
+        ticket: key,
+        profile: "requirements-analyst",
+        kind: "analyse",
+        round: 0,
+      };
+      prep.executions = { [E_SEC]: exec as never };
+      prep.questions = {
+        [Q1]: {
+          execution_id: E_SEC,
+          ticket: key,
+          question: "Which currency?",
+          options: [],
+          state: "open",
+          answer: null,
+          share_with_ticket: false,
+        },
+      };
+      prep.findings = [
+        {
+          id: F(1),
+          ticket: key,
+          execution_id: E_SEC,
+          round: 0,
+          severity: "info",
+          blocking: false,
+          title: "Split this ticket",
+          addressed_in_round: null,
+        },
+      ];
+      const items = prepModel(board, prep);
+      expect(items).toHaveLength(1);
+      expect(items[0]?.questions[0]).toMatchObject({
+        scope: "prep",
+        asker: "Requirements analyst, analysis",
+      });
+      expect(items[0]?.notes.map((n) => n.title)).toEqual(["Split this ticket"]);
+      expect(prepModel(board, null)).toEqual([]);
+    });
   });
 });
