@@ -1335,9 +1335,9 @@ describe("agent profile editor", () => {
     if (r.ok) accepted(saveProfileAction(r.profile));
   });
 
-  test("a new profile builds from the name, with codex as a harness", () => {
+  test("a new profile builds from the name, with cursor as a harness", () => {
     const r = buildProfile(
-      { ...blankDraft("reviewer"), name: "Frontend reviewer", harness: "codex", timeout_min: "30" },
+      { ...blankDraft("reviewer"), name: "Frontend reviewer", harness: "cursor", timeout_min: "30" },
       [],
       NOW,
     );
@@ -1345,7 +1345,7 @@ describe("agent profile editor", () => {
     expect(r.profile).toMatchObject({
       id: "frontend-reviewer",
       role: "reviewer",
-      harness: "codex",
+      harness: "cursor",
       timeout_min: 30,
     });
   });

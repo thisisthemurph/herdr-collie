@@ -1323,7 +1323,7 @@ export function eventRows(
 
 // --- Agent profile editor (Phase 7)
 
-export const HARNESSES = ["claude-code", "codex"] as const;
+export const HARNESSES = ["claude-code", "cursor"] as const;
 export const ROLE_OPTIONS = ["developer", "reviewer", "analyst"] as const;
 
 /** A profile as the editor holds it: every field as text or a flag, so half-typed input is fine. */

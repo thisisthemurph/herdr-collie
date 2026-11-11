@@ -8,7 +8,7 @@
 | Herdr with `hc` | Collie is a Herdr mod, and agents run in Herdr terminals. The pinned versions are in `docs/herdr/VERSION` |
 | [Bun](https://bun.sh) 1.x | Builds Collie |
 | git 2.38 or later | The PR conflict check uses `git merge-tree --write-tree`. `run.start` refuses an older git and says so |
-| [Claude Code](https://claude.com/claude-code) (`claude`) | The default agent harness. Codex is the second harness (see below) |
+| [Claude Code](https://claude.com/claude-code) (`claude`) | The default agent harness. Cursor is the second harness (see below) |
 | A Jira Cloud site and a Bitbucket Cloud repository | Where tickets come from and PRs go to |
 | A local clone of that repository | Agents work in worktrees of it. Collie never touches your working copy's branch |
 
@@ -81,16 +81,16 @@ Closing the mod does not stop it, and a run carries on. Reopen the tab to see wh
 ## Agent profiles and harnesses
 
 A profile says which harness runs an agent, its model, extra arguments, permissions, a time limit
-and its instructions. Collie seeds `developer`, `developer-codex`, three reviewers and
+and its instructions. Collie seeds `developer`, `developer-cursor`, three reviewers and
 `requirements-analyst`, only when missing, so your edits and deletions are never undone. Edit them in
 the profile editor. Workflows pick profiles by id.
 
 | Harness | Program | Notes |
 | --- | --- | --- |
 | `claude-code` | `claude` on `PATH`, or `$COLLIE_CLAUDE` | Tested against a real Claude Code (Phase 0 spike) |
-| `codex` | `codex` on `PATH`, or `$COLLIE_CODEX` | Collie puts the instructions in front of the first message because Codex has no flag for a system prompt. **Not yet run against a real Codex**: check it with the manual checklist before relying on it |
+| `cursor` | `cursor-agent`, else `agent`, on `PATH`, or `$COLLIE_CURSOR` | Collie puts the instructions in front of the first message because Cursor's CLI documents no system-prompt flag. Cursor has no command allowlist: without `--force` in the profile's arguments the agent asks before running commands, and someone answers in its terminal; with it, it runs any command unasked. **Not yet run against a real Cursor Agent**: check it with the manual checklist before relying on it. Log in with `agent login` first |
 
-`hc run` doesn't expand shell aliases, so use a real path in `COLLIE_CLAUDE` or `COLLIE_CODEX` if
+`hc run` doesn't expand shell aliases, so use a real path in `COLLIE_CLAUDE` or `COLLIE_CURSOR` if
 your command is an alias.
 
 ### The instructions Collie adds to every agent
@@ -117,7 +117,7 @@ uncommitted changes or commits the remote doesn't have**. Collie logs why it kep
 | Variable | Effect |
 | --- | --- |
 | `COLLIE_HOME` | Where Collie keeps its files (default `~/.collie`) |
-| `COLLIE_CLAUDE`, `COLLIE_CODEX` | Full path to the harness program |
+| `COLLIE_CLAUDE`, `COLLIE_CURSOR` | Full path to the harness program |
 | `COLLIE_HC` | The `hc` program (default: `hc` on `PATH`) |
 | `COLLIE_NO_AGENTS=1` | A controller that never starts agents or contacts a code host: for tests |
 
