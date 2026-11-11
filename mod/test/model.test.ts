@@ -6,29 +6,51 @@ import { formatIssues, validateCommand } from "@collie/schema";
 import {
   alerts,
   answerAction,
+  blankDraft,
   boardModel,
+  buildProfile,
   COMPLETE_AT_OPTIONS,
+  decodeLines,
+  defaultActivityRun,
+  deleteRun,
+  describeEvent,
   describeReply,
+  draftOf,
+  duplicateDraft,
+  encodeLines,
+  eventKinds,
+  eventRows,
+  eventTickets,
   excludeAction,
   execChipLabel,
   execLine,
   externalActions,
   findingRows,
   findingTickets,
+  formatDuration,
   investigateAction,
   investigateTargets,
+  isPruned,
   jiraStepsText,
+  metricsLines,
+  needsConfirm,
   needsYou,
+  newRunFrom,
   nextPreparation,
   nextWorkflow,
   PR_DRAFT_OPTIONS,
+  parseEvents,
   parseImport,
   prBadges,
   prepModel,
   prRows,
   questionRows,
+  type RunRecord,
   type RunView,
+  runHistory,
+  runMetrics,
   runModel,
+  saveProfileAction,
   settingAction,
   startAction,
   ticketRunActions,
@@ -477,7 +499,7 @@ describe("questions, findings and the Needs you banner (Phase 5)", () => {
     const items = needsYou(needy(), summaries);
     expect(items.map((i) => [i.kind, i.ticket, i.actions.map((a) => a.label)])).toEqual([
       ["question", "PAY-1", ["Answer"]],
-      ["round_cap", "PAY-2", ["Retry (one more round)"]],
+      ["round_cap", "PAY-2", ["Retry (one more round)", "Cancel ticket"]],
     ]);
     expect(items[0]?.reason).toBe(
       "Security reviewer, review round 1 asks: Should the endpoint return 404 or 410?",
@@ -499,7 +521,7 @@ describe("questions, findings and the Needs you banner (Phase 5)", () => {
     sec.agent_blocked = { kind: "permission", message: "approve Bash: go test" };
     const items = needsYou(v, summaries);
     expect(items.map((i) => [i.kind, i.actions.map((a) => a.label)])).toEqual([
-      ["execution_failed", ["Retry", "Watch terminal"]],
+      ["execution_failed", ["Retry", "Watch terminal", "Cancel ticket"]],
       ["agent_blocked", ["Watch terminal"]],
     ]);
     expect(items[1]?.reason).toBe(
@@ -880,5 +902,474 @@ describe("questions, findings and the Needs you banner (Phase 5)", () => {
         if (!r.ok) throw new Error(`${a.command}: ${formatIssues(r.issues)}`);
       }
     });
+  });
+});
+
+// --- Phase 7
+
+const asCmd = (a: { command: string; args: unknown }) =>
+  validateCommand({
+    v: 1,
+    id: "01JC9A0C000000000000000001",
+    command: a.command,
+    at: "2026-11-09T10:00:00Z",
+    args: a.args,
+  });
+const accepted = (a: { id?: string; command: string; args: unknown }) => {
+  const r = asCmd(a);
+  if (!r.ok) throw new Error(`${a.id ?? a.command}: ${formatIssues(r.issues)}`);
+};
+
+describe("retry and cancel follow the controller's rules", () => {
+  const RUN = "01JC8YQ0000000000000000001";
+  const E1 = "01JC8Z1A000000000000000001";
+  const tk = (over: Record<string, unknown>) => ({
+    state: "in_progress",
+    resume_state: null,
+    attention: [] as { kind: string; id?: string }[],
+    round: 1,
+    branch: null,
+    base: null,
+    executions: [] as string[],
+    pr: null,
+    ...over,
+  });
+  const exec = (state: string) => ({
+    ticket: "PAY-1",
+    profile: "developer",
+    kind: "develop",
+    state,
+    attempt: 1,
+    round: 1,
+    terminal: "t1",
+    nudges: 0,
+    started_at: null,
+    ended_at: null,
+    result: null,
+  });
+  const run = (status: RunView["status"], ticket: Record<string, unknown>, execState = "working"): RunView =>
+    ({
+      id: RUN,
+      number: 1,
+      status,
+      boardId: "01JC8XW0000000000000000001",
+      state: {
+        v: 1,
+        run_id: RUN,
+        last_event_id: null,
+        status,
+        leases: ["PAY-1"],
+        tickets: { "PAY-1": tk({ executions: [E1], ...ticket }) },
+        executions: { [E1]: exec(execState) },
+        questions: {},
+        findings: [],
+        inbox_offsets: {},
+      },
+    }) as unknown as RunView;
+  const labels = (v: RunView) => {
+    const m = runModel(v);
+    return ticketRunActions(RUN, m?.tickets["PAY-1"] as never, v.status).map((a) => a.label);
+  };
+
+  test("cancel: only in an active run, and only for a ticket that isn't final", () => {
+    expect(labels(run("running", {}))).toEqual(["Stop agent (attempt 1)", "Cancel ticket"]);
+    expect(labels(run("paused", {}))).toEqual(["Stop agent (attempt 1)", "Cancel ticket"]);
+    expect(labels(run("completed", { state: "cancelled" }, "cancelled"))).toEqual([]);
+    expect(labels(run("running", { state: "completed" }, "completed"))).toEqual([]);
+    expect(labels(run("running", { state: "cancelled" }, "cancelled"))).toEqual([]);
+    // A finished agent can't be stopped.
+    expect(labels(run("running", {}, "failed"))).toEqual(["Cancel ticket"]);
+  });
+
+  test("retry: only while the run is running, and only for a held ticket", () => {
+    const held = { state: "needs_input", attention: [{ kind: "execution_failed", id: E1 }] };
+    expect(labels(run("running", held, "failed"))).toEqual(["Retry with a new agent", "Cancel ticket"]);
+    expect(labels(run("paused", held, "failed"))).toEqual(["Cancel ticket"]);
+    expect(
+      labels(run("running", { state: "needs_input", attention: [{ kind: "round_cap" }] }, "completed")),
+    ).toEqual(["Retry (one more round)", "Cancel ticket"]);
+    // A question alone isn't retryable: it is answered.
+    expect(
+      labels(run("running", { state: "needs_input", attention: [{ kind: "question" }] }, "working")),
+    ).toEqual(["Stop agent (attempt 1)", "Cancel ticket"]);
+    // Delivery retry, also on a completed ticket (delivery goes on behind it), but not once the run ended.
+    const undelivered = { state: "completed", attention: [{ kind: "delivery_error" }] };
+    expect(labels(run("running", undelivered, "completed"))).toEqual(["Retry delivery"]);
+    expect(labels(run("completed", undelivered, "completed"))).toEqual([]);
+  });
+
+  test("the Needs you banner offers Cancel ticket next to Retry, in an active run", () => {
+    const held = run(
+      "running",
+      { state: "needs_input", attention: [{ kind: "execution_failed", id: E1 }] },
+      "failed",
+    );
+    const items = needsYou(held);
+    expect(items[0]?.actions.map((a) => a.label)).toEqual(["Retry", "Watch terminal", "Cancel ticket"]);
+    const paused = needsYou(
+      run("paused", { state: "needs_input", attention: [{ kind: "execution_failed", id: E1 }] }, "failed"),
+    );
+    expect(paused[0]?.actions.map((a) => a.label)).toEqual(["Watch terminal", "Cancel ticket"]);
+    const done = needsYou(
+      run("running", { state: "completed", attention: [{ kind: "delivery_error" }] }, "completed"),
+    );
+    expect(done[0]?.actions.map((a) => a.label)).toEqual(["Retry delivery"]);
+  });
+
+  test("cancels and deletes ask for a second click; retries don't", () => {
+    for (const c of ["ticket.cancel", "exec.cancel", "run.cancel", "run.delete"])
+      expect(needsConfirm(c)).toBe(true);
+    for (const c of ["ticket.retry", "run.start", "profile.save", "run.pause"])
+      expect(needsConfirm(c)).toBe(false);
+  });
+
+  test("every retry and cancel button sends a command the controller accepts", () => {
+    const held = run("running", { state: "needs_input", attention: [{ kind: "execution_failed", id: E1 }] });
+    const all = [
+      ...ticketRunActions(RUN, runModel(held)?.tickets["PAY-1"] as never, "running"),
+      ...needsYou(held).flatMap((i) => i.actions.flatMap((a) => (a.type === "ctl" ? [a] : []))),
+    ];
+    expect(all.length).toBeGreaterThanOrEqual(5);
+    for (const a of all) accepted(a);
+  });
+});
+
+describe("Activity: run history", () => {
+  const BOARD = "01JC8XW0000000000000000001";
+  const R1 = "01JC8YQ0000000000000000001";
+  const R2 = "01JC8YQ0000000000000000002";
+  const NOW = Date.parse("2026-11-10T12:00:00Z");
+  const rec = (over: Partial<RunRecord>): RunRecord => ({
+    id: R1,
+    number: 1,
+    boardId: BOARD,
+    status: "completed",
+    startedAt: "2026-11-01T10:00:00Z",
+    endedAt: "2026-11-01T11:30:00Z",
+    endReason: "all tickets done",
+    carriedOverFrom: null,
+    state: null,
+    hasInbox: true,
+    ...over,
+  });
+
+  test("runs list newest first with their dates, counts and end reason", () => {
+    const rows = runHistory(
+      [
+        rec({
+          state: {
+            v: 1,
+            run_id: R1,
+            last_event_id: null,
+            status: "completed",
+            leases: [],
+            tickets: {
+              "PAY-1": { state: "completed", pr: { id: 7, state: "OPEN" } },
+              "PAY-2": { state: "cancelled", pr: null },
+            },
+            executions: {},
+            questions: {},
+            findings: [],
+            inbox_offsets: {},
+          } as never,
+        }),
+        rec({ id: R2, number: 2, status: "running", endedAt: null, endReason: null, carriedOverFrom: R1 }),
+      ],
+      NOW,
+    );
+    expect(rows.map((r) => r.title)).toEqual(["Run 2", "Run 1"]);
+    expect(rows[0]).toMatchObject({ when: "started 2026-11-01 10:00", active: true, carriedFrom: 1 });
+    expect(rows[1]).toMatchObject({
+      when: "2026-11-01 10:00 → 2026-11-01 11:30",
+      tickets: "1 of 2 done, 1 cancelled",
+      prs: 1,
+      openPrs: 1,
+      endReason: "all tickets done",
+      pruned: false,
+    });
+    expect(defaultActivityRun(rows)).toBe(R2);
+    expect(defaultActivityRun(rows.slice(1))).toBe(R1);
+    expect(defaultActivityRun([])).toBeNull();
+  });
+
+  test("inbox and attachments count as pruned only after 90 days and without inbox.jsonl", () => {
+    const old = "2026-07-01T00:00:00Z";
+    expect(isPruned({ endedAt: old, hasInbox: false }, NOW)).toBe(true);
+    expect(isPruned({ endedAt: old, hasInbox: true }, NOW)).toBe(false);
+    expect(isPruned({ endedAt: "2026-11-01T00:00:00Z", hasInbox: false }, NOW)).toBe(false);
+    expect(isPruned({ endedAt: null, hasInbox: false }, NOW)).toBe(false);
+  });
+
+  test("New run from a run needs an ended run and a free board; Delete refuses an active one", () => {
+    const row = { id: R1, active: false, number: 1 };
+    expect(newRunFrom(BOARD, row, null, null)).toMatchObject({
+      disabled: null,
+      action: { command: "run.start", args: { board_id: BOARD, carry_over_from: R1 } },
+    });
+    expect(newRunFrom(BOARD, row, null, { number: 2, status: "running" })?.disabled).toBe(
+      "Run 2 is running.",
+    );
+    expect(newRunFrom(BOARD, row, "Import tickets first.", null)?.disabled).toBe("Import tickets first.");
+    expect(newRunFrom(BOARD, { ...row, active: true }, null, null)).toBeNull();
+    expect(deleteRun({ id: R1, active: true, status: "paused" }).disabled).toContain("cancel it");
+    expect(deleteRun({ id: R1, active: false, status: "completed" })).toMatchObject({
+      disabled: null,
+      action: { command: "run.delete", args: { run_id: R1 } },
+    });
+  });
+
+  test("the history buttons send commands the controller accepts", () => {
+    const n = newRunFrom(BOARD, { id: R1, active: false, number: 1 }, null, null);
+    if (!n) throw new Error("no action");
+    accepted(n.action);
+    accepted(deleteRun({ id: R1, active: false, status: "completed" }).action);
+  });
+});
+
+describe("Activity: events and metrics", () => {
+  const line = (type: string, ts: string, ticket: string | null, payload: object, source = "controller") =>
+    JSON.stringify({
+      v: 1,
+      id: `id-${ts}-${type}`,
+      type,
+      ts,
+      source,
+      run_id: "r",
+      execution_id: null,
+      ticket,
+      caused_by: null,
+      payload,
+    });
+  const log = [
+    line("ticket.state_changed", "2026-11-08T10:00:00.000Z", "PAY-1", {
+      from: "ready",
+      to: "in_progress",
+      reason: "agent started",
+    }),
+    line("execution.started", "2026-11-08T10:00:01.000Z", "PAY-1", { terminal: "t1" }),
+    line(
+      "finding",
+      "2026-11-08T10:10:00.000Z",
+      "PAY-1",
+      { severity: "high", title: "Missing check", blocking: true, body_ref: "attachments/x.md" },
+      "agent",
+    ),
+    line("agent.event_accepted", "2026-11-08T10:10:00.100Z", "PAY-1", { event_type: "finding" }),
+    line("ask", "2026-11-08T10:11:00.000Z", "PAY-2", { question: "Which table?" }, "agent"),
+    line("pr.created", "2026-11-08T10:20:00.000Z", "PAY-1", {
+      number: 7,
+      url: "u",
+      base: "main",
+      head: "pay-1",
+      draft: false,
+    }),
+    line("delivery.failed", "2026-11-08T10:21:00.000Z", "PAY-2", {
+      step: "push",
+      reason: "no network",
+      attempt: 1,
+      final: false,
+    }),
+    line("ticket.state_changed", "2026-11-08T10:22:00.000Z", "PAY-1", {
+      from: "delivering",
+      to: "completed",
+      reason: "pr created",
+    }),
+  ].join("\n");
+  const events = parseEvents(`${log}\n\n{"torn":`);
+
+  test("a blank or torn line is skipped, not fatal", () => {
+    expect(events).toHaveLength(8);
+    expect(parseEvents("not json\n")).toEqual([]);
+  });
+
+  test("kinds, ticket filter and ordering (newest last), without the accepted-event bookkeeping", () => {
+    const all = eventRows(events, { ticket: null, kind: null }, false);
+    expect(all.total).toBe(7);
+    expect(all.rows.map((r) => r.type)).toEqual([
+      "ticket.state_changed",
+      "execution.started",
+      "finding",
+      "ask",
+      "pr.created",
+      "delivery.failed",
+      "ticket.state_changed",
+    ]);
+    expect(eventRows(events, { ticket: "PAY-2", kind: null }, false).rows.map((r) => r.type)).toEqual([
+      "ask",
+      "delivery.failed",
+    ]);
+    const kind = (k: Parameters<typeof eventRows>[1]["kind"]) =>
+      eventRows(events, { ticket: null, kind: k }, false).rows.map((r) => r.type);
+    expect(kind("state")).toEqual(["ticket.state_changed", "execution.started", "ticket.state_changed"]);
+    expect(kind("question")).toEqual(["ask"]);
+    expect(kind("finding")).toEqual(["finding"]);
+    expect(kind("pr")).toEqual(["pr.created", "delivery.failed"]);
+    expect(kind("error")).toEqual(["delivery.failed"]);
+    expect(eventTickets(events)).toEqual(["PAY-1", "PAY-2"]);
+    expect(eventKinds({ type: "run.cancelled" })).toEqual(["state"]);
+  });
+
+  test("a body that retention removed reads 'removed after 90 days', not a path", () => {
+    const text = (pruned: boolean) => eventRows(events, { ticket: null, kind: "finding" }, pruned).rows[0];
+    expect(text(false)?.text).toContain("full text in attachments/x.md");
+    expect(text(true)?.text).toContain("full text removed after 90 days");
+    expect(text(true)?.removed).toBe(true);
+    expect(text(true)?.text).not.toContain("attachments/");
+  });
+
+  test("only the newest 300 rows are drawn", () => {
+    const many = Array.from(
+      { length: 450 },
+      (_, i) =>
+        parseEvents(
+          line(
+            "status",
+            `2026-11-08T10:00:${String(i % 60).padStart(2, "0")}.000Z`,
+            "PAY-1",
+            { message: `m${i}` },
+            "agent",
+          ),
+        )[0],
+    ).filter((e): e is NonNullable<typeof e> => !!e);
+    const r = eventRows(
+      many.map((e, i) => ({ ...e, id: String(i) })),
+      { ticket: null, kind: null },
+      false,
+    );
+    expect(r.total).toBe(450);
+    expect(r.rows).toHaveLength(300);
+    expect(r.rows.at(-1)?.text).toBe("m449");
+  });
+
+  test("describeEvent reads naturally", () => {
+    expect(describeEvent(events[0] as never)).toBe("ready → in_progress: agent started");
+    expect(describeEvent(events[5] as never)).toBe("PR #7 pay-1 → main");
+  });
+
+  test("metrics come from computeMetrics over the log", () => {
+    const m = runMetrics(
+      parseEvents(
+        [
+          line("execution.started", "2026-11-08T10:00:00.000Z", "PAY-1", { terminal: "t" }),
+          line("pr.created", "2026-11-08T10:12:00.000Z", "PAY-1", {
+            number: 1,
+            url: "u",
+            base: "main",
+            head: "h",
+            draft: false,
+          }),
+          line("ticket.state_changed", "2026-11-08T10:13:00.000Z", "PAY-1", {
+            from: "delivering",
+            to: "completed",
+            reason: "x",
+          }),
+          line("execution.started", "2026-11-08T10:00:00.000Z", "PAY-2", { terminal: "t" }),
+          line(
+            "question.answered",
+            "2026-11-08T10:05:00.000Z",
+            "PAY-2",
+            { question_id: "q", answer: "a", by: "human", share_with_ticket: false },
+            "human",
+          ),
+        ].join("\n"),
+      ),
+    );
+    expect(metricsLines(m)).toEqual([
+      { label: "Completed without intervention", value: "1 of 2" },
+      { label: "Interventions per ticket", value: "0.5" },
+      { label: "Median time to PR", value: "12 min" },
+      { label: "Remediation success", value: "none needed" },
+    ]);
+    expect(metricsLines(runMetrics([])).map((l) => l.value)).toEqual([
+      "0 of 0",
+      "0",
+      "no PR yet",
+      "none needed",
+    ]);
+    expect(formatDuration(45_000)).toBe("45 s");
+    expect(formatDuration(65 * 60_000)).toBe("1 h 5 min");
+  });
+});
+
+describe("agent profile editor", () => {
+  const dev = {
+    v: 1 as const,
+    id: "developer",
+    name: "Developer",
+    role: "developer" as const,
+    harness: "claude-code",
+    model: "sonnet",
+    args: ["--permission-mode", "acceptEdits"],
+    instructions: "Line one.\nLine two with a \\ backslash.",
+    permissions: { write_worktree: true, shell: true, network: false },
+    timeout_min: 60,
+    max_attempts: 2,
+    updated_at: "2026-11-10T00:00:00Z",
+  };
+  const NOW = "2026-11-10T09:30:15.123Z";
+
+  test("line breaks and backslashes survive the one-line field", () => {
+    const text = "a\\nb\nc\\";
+    expect(decodeLines(encodeLines(text))).toBe(text);
+    expect(encodeLines("x\ny")).toBe("x\\ny");
+  });
+
+  test("editing and saving gives the whole profile with a fresh updated_at", () => {
+    const d = draftOf(dev);
+    const r = buildProfile({ ...d, model: "opus", args: "--a\\n--b" }, ["developer"], NOW);
+    if (!r.ok) throw new Error(r.issues.join("; "));
+    expect(r.profile).toEqual({
+      ...dev,
+      model: "opus",
+      args: ["--a", "--b"],
+      updated_at: "2026-11-10T09:30:15Z",
+    });
+    accepted(saveProfileAction(r.profile));
+  });
+
+  test("a duplicate gets a free id and saves as a new profile", () => {
+    const d = duplicateDraft(dev, ["developer", "developer-copy"]);
+    expect(d).toMatchObject({ isNew: true, id: "developer-copy-2", name: "Developer (copy)" });
+    const r = buildProfile(d, ["developer", "developer-copy"], NOW);
+    expect(r.ok).toBe(true);
+    if (r.ok) accepted(saveProfileAction(r.profile));
+  });
+
+  test("a new profile builds from the name, with cursor as a harness", () => {
+    const r = buildProfile(
+      { ...blankDraft("reviewer"), name: "Frontend reviewer", harness: "cursor", timeout_min: "30" },
+      [],
+      NOW,
+    );
+    if (!r.ok) throw new Error(r.issues.join("; "));
+    expect(r.profile).toMatchObject({
+      id: "frontend-reviewer",
+      role: "reviewer",
+      harness: "cursor",
+      timeout_min: 30,
+    });
+  });
+
+  test("the schema's issues are shown, naming each field", () => {
+    const r = buildProfile(
+      { ...blankDraft(), name: "", timeout_min: "abc", max_attempts: "0", model: "" },
+      [],
+      NOW,
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const text = r.issues.join("\n");
+    expect(text).toContain("name");
+    expect(text).toContain("timeout_min");
+    expect(text).toContain("max_attempts");
+    expect(text).toContain("model");
+  });
+
+  test("a new profile may not silently replace an existing id; an unknown harness is refused", () => {
+    const r = buildProfile({ ...blankDraft(), name: "Developer", id: "developer" }, ["developer"], NOW);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.issues.join("\n")).toContain("already exists");
+    const h = buildProfile({ ...draftOf(dev), harness: "gemini" }, ["developer"], NOW);
+    expect(h.ok).toBe(false);
   });
 });

@@ -288,16 +288,16 @@ The MVP is complete when the MVP acceptance scenario below passes as an automate
 
 - Mod: the Activity view and run history (wireframe 6), New run from a previous run, and the agent profile editor (wireframe 5).
 - Retry and cancel controls for executions and tickets throughout the UI.
-- A second harness profile (Codex or your choice).
+- A second harness profile (Cursor, chosen at Phase 7).
 - Run metrics: tickets completed without intervention, interventions per ticket, time to PR, remediation success.
 - Docs: README, setup guide, and the agent instructions block Collie appends to every profile.
 - The MVP acceptance scenario as an end-to-end test on fake `hc`, fake agents and recorded Jira and Bitbucket responses, plus a manual checklist for the real run.
 
 **Done when**
 
-- [ ] The end-to-end scenario passes in CI.
+- [x] The end-to-end scenario passes in CI.
 - [ ] A manual run on a real Jira board with five tickets reaches PRs, with every step checked off the manual list.
-- [ ] The retention rules from the protocol doc are implemented: the daily prune pass, worktree removal that never loses unpushed work, terminal cleanup, and `run.delete`.
+- [x] The retention rules from the protocol doc are implemented: the daily prune pass, worktree removal that never loses unpushed work, terminal cleanup, and `run.delete`.
 
 ## MVP acceptance scenario
 

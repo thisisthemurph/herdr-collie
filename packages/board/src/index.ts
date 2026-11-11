@@ -4,4 +4,5 @@
 export * from "./graph.ts";
 export * from "./jira.ts";
 export * from "./layout.ts";
+export * from "./metrics.ts";
 export * from "./schedule.ts";

@@ -353,3 +353,33 @@ describe("the hc wrapper", () => {
     await expect(hc.get("t1")).rejects.toMatchObject({ kind: "unavailable" });
   });
 });
+
+describe("cursor adapter", () => {
+  const cursor = (resolve: (n: string) => string | null) => {
+    const a = defaultAdapters(resolve).cursor;
+    if (!a) throw new Error("no adapter");
+    return a;
+  };
+  const cp = { ...profile, harness: "cursor", model: "auto", args: ["--force"] };
+
+  test("the instructions go in front of the first message, which comes before every option", () => {
+    const l = cursor((n) => `/opt/bin/${n}`).launch({ profile: cp, systemPrompt: "SYS", firstMessage: "go" });
+    expect(l.argv).toEqual(["/opt/bin/cursor-agent", "SYS\n\ngo", "--model", "auto", "--force"]);
+    expect(l.env).toEqual({});
+  });
+
+  test("falls back to `agent` when there is no cursor-agent", () => {
+    const l = cursor((n) => (n === "agent" ? "/opt/bin/agent" : null)).launch({
+      profile: cp,
+      systemPrompt: "S",
+      firstMessage: "g",
+    });
+    expect(l.argv[0]).toBe("/opt/bin/agent");
+  });
+
+  test("a machine without Cursor's CLI gets a message that says what to do", () => {
+    expect(() => cursor(() => null).launch({ profile: cp, systemPrompt: "S", firstMessage: "g" })).toThrow(
+      /COLLIE_CURSOR/,
+    );
+  });
+});

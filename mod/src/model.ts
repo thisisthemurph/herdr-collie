@@ -1,6 +1,7 @@
 // The Collie mod's view model: everything the Board setup and Graph screens show, worked out
 // from a board.json. Pure (no Herdr calls), so it is unit-tested apart from rendering.
 import {
+  computeMetrics,
   criticalPath,
   describeCycle,
   edges,
@@ -8,10 +9,20 @@ import {
   type Layout,
   layout,
   type Readiness,
+  type RunMetrics,
   readiness,
   satisfiesPolicy,
 } from "@collie/board";
-import type { Board, BoardTicket, ExecutionState, RunState, StateFile, TicketState } from "@collie/schema";
+import type {
+  Board,
+  BoardTicket,
+  ExecutionState,
+  Profile,
+  RunState,
+  StateFile,
+  TicketState,
+} from "@collie/schema";
+import { formatIssues, validateProfile } from "@collie/schema";
 
 export const PREPARATIONS: BoardTicket["preparation"][] = [
   "unreviewed",
@@ -381,8 +392,22 @@ export function startAction(
   return { action, disabled: m.startBlocked };
 }
 
-/** What a person can do to one ticket of a run. */
-export function ticketRunActions(runId: string, t: TicketRunView): Action[] {
+/** Cancels and deletes are destructive: the UI asks twice before sending one. */
+export const needsConfirm = (command: string) =>
+  ["ticket.cancel", "exec.cancel", "run.cancel", "run.delete"].includes(command);
+
+/** The controller's `requireRun`: only a running or paused run takes ticket and run commands. */
+export const runIsActive = (status: RunState) => status === "running" || status === "paused";
+
+/**
+ * What a person can do to one ticket of a run, following the controller's rules
+ * (packages/controller/src/commands.ts):
+ * - `ticket.cancel`: the run is running or paused and the ticket isn't completed or cancelled.
+ * - `exec.cancel`: the execution isn't completed, failed or cancelled.
+ * - `ticket.retry`: the run is *running* (a paused run says "resume it first") and the ticket is held
+ *   for a failed execution or the round cap, or carries a delivery error.
+ */
+export function ticketRunActions(runId: string, t: TicketRunView, runStatus: RunState = "running"): Action[] {
   const out: Action[] = [];
   const retry = (label: string): Action => ({
     id: `retry-${t.key}`,
@@ -390,13 +415,16 @@ export function ticketRunActions(runId: string, t: TicketRunView): Action[] {
     command: "ticket.retry",
     args: { run_id: runId, ticket: t.key },
   });
-  if (t.state === "needs_input" && t.attentionKinds.includes("execution_failed"))
-    out.push(retry("Retry with a new agent"));
-  else if (t.state === "needs_input" && t.attentionKinds.includes("round_cap"))
-    out.push(retry("Retry (one more round)"));
-  // A completed ticket can carry delivery_error too (delivery goes on behind it), so no state check.
-  if (t.attentionKinds.includes("delivery_error") && t.state !== "cancelled")
-    out.push(retry("Retry delivery"));
+  const active = runIsActive(runStatus);
+  if (runStatus === "running") {
+    if (t.state === "needs_input" && t.attentionKinds.includes("execution_failed"))
+      out.push(retry("Retry with a new agent"));
+    else if (t.state === "needs_input" && t.attentionKinds.includes("round_cap"))
+      out.push(retry("Retry (one more round)"));
+    // A completed ticket can carry delivery_error too (delivery goes on behind it), so no state check.
+    if (t.attentionKinds.includes("delivery_error") && t.state !== "cancelled")
+      out.push(retry("Retry delivery"));
+  }
   for (const e of t.executions.filter((x) => x.live))
     out.push({
       id: `cancel-exec-${e.id}`,
@@ -404,7 +432,7 @@ export function ticketRunActions(runId: string, t: TicketRunView): Action[] {
       command: "exec.cancel",
       args: { run_id: runId, execution_id: e.id },
     });
-  if (t.state !== "completed" && t.state !== "cancelled")
+  if (active && t.state !== "completed" && t.state !== "cancelled")
     out.push({
       id: `cancel-${t.key}`,
       label: "Cancel ticket",
@@ -583,6 +611,20 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
         command: "ticket.retry",
         args: { run_id: run.id, ticket },
       });
+      const cancel: NeedAction[] =
+        runIsActive(run.status) && t.state !== "completed"
+          ? [
+              {
+                id: `cancel-${ticket}-${a.kind}`,
+                label: "Cancel ticket",
+                type: "ctl",
+                command: "ticket.cancel",
+                args: { run_id: run.id, ticket },
+              },
+            ]
+          : [];
+      // The controller refuses a retry unless the run is running ("resume it first").
+      const retries = (label: string): NeedAction[] => (run.status === "running" ? [retry(label)] : []);
       const failed = a.id ? st.executions[a.id] : undefined;
       const watch: NeedAction[] = failed?.terminal
         ? [
@@ -601,7 +643,7 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
           ticket,
           summary: summary(ticket),
           reason: `Reviews still found blocking issues after round ${t.round}, the last allowed.`,
-          actions: [retry("Retry (one more round)")],
+          actions: [...retries("Retry (one more round)"), ...cancel],
         });
       else if (a.kind === "execution_failed") {
         const r = failed?.result as { reason?: string } | null | undefined;
@@ -611,7 +653,7 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
           ticket,
           summary: summary(ticket),
           reason: `${failed ? failed.profile : "An agent"} failed with no attempts left${r?.reason ? `: ${r.reason}` : ""}.`,
-          actions: [retry("Retry"), ...watch],
+          actions: [...retries("Retry"), ...watch, ...cancel],
         });
       } else if (a.kind === "delivery_error")
         out.push({
@@ -620,7 +662,7 @@ export function needsYou(run: RunView, summaries: Summaries = {}): NeedItem[] {
           ticket,
           summary: summary(ticket),
           reason: "Delivery failed: pushing the branch or opening the pull request.",
-          actions: [retry("Retry delivery")],
+          actions: [...retries("Retry delivery"), ...cancel],
         });
     }
   }
@@ -901,4 +943,506 @@ export const settingAction = (
   label: "Change setting",
   command: "board.update_settings",
   args: { board_id: boardId, settings },
+});
+
+// --- Activity: run history, metrics and the event log (Phase 7)
+
+/** A run as the Activity view lists it: run.json's header, state.json, and what retention left. */
+export type RunRecord = {
+  id: string;
+  number: number;
+  boardId: string;
+  status: RunState;
+  startedAt: string;
+  endedAt: string | null;
+  endReason: string | null;
+  carriedOverFrom: string | null;
+  state: StateFile | null;
+  /** Whether inbox.jsonl still exists in the run's directory. */
+  hasInbox: boolean;
+};
+
+export const RETENTION_DAYS = 90;
+const DAY_MS = 86_400_000;
+
+/**
+ * Whether a run's inbox and attachments were pruned (protocol, "Retention": removed 90 days after
+ * the run ends). DECISION: "pruned" is read from the files, not assumed from the date alone: an
+ * old run that still has inbox.jsonl (the controller hasn't run its prune pass yet) shows normally.
+ */
+export function isPruned(r: Pick<RunRecord, "endedAt" | "hasInbox">, nowMs: number): boolean {
+  if (!r.endedAt || r.hasInbox) return false;
+  const ended = Date.parse(r.endedAt);
+  return Number.isFinite(ended) && nowMs - ended > RETENTION_DAYS * DAY_MS;
+}
+
+/** "2026-11-08T10:01:00Z" -> "2026-11-08 10:01" (UTC). */
+export const shortTime = (iso: string | null) => (iso ? iso.slice(0, 16).replace("T", " ") : "");
+
+/** "45 s", "12 min", "1 h 5 min". */
+export function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} h ${m % 60} min` : `${h} h`;
+}
+
+export type RunHistoryRow = {
+  id: string;
+  number: number;
+  status: RunState;
+  tone: Tone;
+  title: string;
+  /** "2026-11-08 10:01 → 2026-11-08 11:30", or "started 2026-11-08 10:01" while it runs. */
+  when: string;
+  /** "3 of 5 done", with ", 1 cancelled" when some were. */
+  tickets: string;
+  prs: number;
+  openPrs: number;
+  endReason: string | null;
+  /** The number of the run it carried completed tickets over from, when that run is known. */
+  carriedFrom: number | null;
+  active: boolean;
+  /** Its inbox and attachments were removed after 90 days. */
+  pruned: boolean;
+};
+
+/** Newest run first. */
+export function runHistory(records: RunRecord[], nowMs: number): RunHistoryRow[] {
+  const numberOf = new Map(records.map((r) => [r.id, r.number]));
+  return [...records]
+    .sort((a, b) => b.number - a.number)
+    .map((r) => {
+      const ts = Object.values(r.state?.tickets ?? {});
+      const done = ts.filter((t) => t.state === "completed").length;
+      const cancelled = ts.filter((t) => t.state === "cancelled").length;
+      const prs = ts.filter((t) => t.pr).length;
+      return {
+        id: r.id,
+        number: r.number,
+        status: r.status,
+        tone: r.status === "completed" ? "done" : r.status === "cancelled" ? "dim" : "working",
+        title: `Run ${r.number}`,
+        when: r.endedAt
+          ? `${shortTime(r.startedAt)} → ${shortTime(r.endedAt)}`
+          : `started ${shortTime(r.startedAt)}`,
+        tickets: `${done} of ${ts.length} done${cancelled ? `, ${cancelled} cancelled` : ""}`,
+        prs,
+        openPrs: ts.filter((t) => t.pr?.state === "OPEN").length,
+        endReason: r.endReason,
+        carriedFrom: r.carriedOverFrom ? (numberOf.get(r.carriedOverFrom) ?? null) : null,
+        active: runIsActive(r.status),
+        pruned: isPruned(r, nowMs),
+      };
+    });
+}
+
+/** The run Activity opens on: the one going, else the newest. */
+export const defaultActivityRun = (rows: RunHistoryRow[]): string | null =>
+  (rows.find((r) => r.active) ?? rows[0])?.id ?? null;
+
+/** New run from a previous run: the board's next run starts with that run's completed tickets done. */
+export const newRunFromAction = (boardId: string, runId: string): Action => ({
+  id: `new-run-from-${runId}`,
+  label: "New run from this run",
+  command: "run.start",
+  args: { board_id: boardId, carry_over_from: runId },
+});
+
+/**
+ * New run from an ended run, or why not. The controller needs the previous run to have ended and
+ * the board to have no active run; the board's own blockers (a cycle, no tickets) also apply.
+ */
+export function newRunFrom(
+  boardId: string,
+  row: Pick<RunHistoryRow, "id" | "active" | "number">,
+  startBlocked: string | null,
+  activeRun: { number: number; status: RunState } | null,
+): { action: Action; disabled: string | null } | null {
+  if (row.active) return null;
+  const action = newRunFromAction(boardId, row.id);
+  const disabled = activeRun ? `Run ${activeRun.number} is ${activeRun.status}.` : startBlocked;
+  return { action, disabled };
+}
+
+export const deleteRunAction = (runId: string): Action => ({
+  id: `delete-run-${runId}`,
+  label: "Delete run",
+  command: "run.delete",
+  args: { run_id: runId },
+});
+
+/**
+ * Delete run, or why not. DECISION: only a running or paused run is blocked here. An ended run
+ * with open PRs is sent anyway and the controller's refusal is shown, since the controller owns
+ * that rule ("still tracked as open") and the mod's view of it could be stale.
+ */
+export function deleteRun(row: Pick<RunHistoryRow, "id" | "active" | "status">): {
+  action: Action;
+  disabled: string | null;
+} {
+  return {
+    action: deleteRunAction(row.id),
+    disabled: row.active ? `The run is ${row.status}; cancel it before deleting it.` : null,
+  };
+}
+
+/** The numbers under a run's header: tickets completed without intervention, and so on. */
+export function metricsLines(m: RunMetrics): { label: string; value: string }[] {
+  return [
+    {
+      label: "Completed without intervention",
+      value: `${m.completedWithoutIntervention} of ${m.total}`,
+    },
+    { label: "Interventions per ticket", value: (Math.round(m.interventionsPerTicket * 10) / 10).toString() },
+    {
+      label: "Median time to PR",
+      value: m.medianTimeToPrMs === null ? "no PR yet" : formatDuration(m.medianTimeToPrMs),
+    },
+    {
+      label: "Remediation success",
+      value:
+        m.remediation.tickets === 0
+          ? "none needed"
+          : `${m.remediation.succeeded} of ${m.remediation.tickets}`,
+    },
+  ];
+}
+
+/** One line of events.jsonl. Only the fields the Activity view reads are typed. */
+export type LogEvent = {
+  id: string;
+  type: string;
+  ts: string;
+  source: string;
+  run_id: string | null;
+  execution_id: string | null;
+  ticket: string | null;
+  caused_by: string | null;
+  payload: Record<string, unknown>;
+};
+
+/** The metrics for a run's events (`computeMetrics` from @collie/board). */
+export const runMetrics = (events: LogEvent[]): RunMetrics => computeMetrics(events);
+
+/**
+ * Parses events.jsonl. A blank line, a line that isn't JSON (a torn final line mid-append) and a
+ * line without a type are skipped rather than failing the whole view.
+ */
+export function parseEvents(text: string): LogEvent[] {
+  const out: LogEvent[] = [];
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const e = JSON.parse(line) as Partial<LogEvent>;
+      if (e && typeof e.type === "string" && typeof e.ts === "string")
+        out.push({
+          id: String(e.id ?? ""),
+          type: e.type,
+          ts: e.ts,
+          source: String(e.source ?? ""),
+          run_id: e.run_id ?? null,
+          execution_id: e.execution_id ?? null,
+          ticket: e.ticket ?? null,
+          caused_by: e.caused_by ?? null,
+          payload: e.payload && typeof e.payload === "object" ? e.payload : {},
+        });
+    } catch {}
+  }
+  return out;
+}
+
+export const EVENT_KINDS = ["state", "question", "finding", "pr", "error"] as const;
+export type EventKind = (typeof EVENT_KINDS)[number];
+export const EVENT_KIND_LABEL: Record<EventKind, string> = {
+  state: "State changes",
+  question: "Questions",
+  finding: "Findings",
+  pr: "PRs",
+  error: "Errors",
+};
+
+/** Which filter kinds an event belongs to (an event can belong to more than one). */
+export function eventKinds(e: Pick<LogEvent, "type">): EventKind[] {
+  const t = e.type;
+  const out: EventKind[] = [];
+  if (
+    t.startsWith("run.") ||
+    t === "ticket.state_changed" ||
+    t === "execution.state_changed" ||
+    t === "execution.created" ||
+    t === "execution.started" ||
+    t === "execution.completed" ||
+    t === "execution.killed" ||
+    t === "ticket.leased" ||
+    t === "ticket.released"
+  )
+    out.push("state");
+  if (t === "ask" || t.startsWith("question.")) out.push("question");
+  if (t === "finding") out.push("finding");
+  if (t.startsWith("pr.") || t.startsWith("jira.") || t.startsWith("delivery.")) out.push("pr");
+  if (
+    t === "execution.failed" ||
+    t === "fail" ||
+    t === "agent.event_rejected" ||
+    t === "command.rejected" ||
+    t === "delivery.failed"
+  )
+    out.push("error");
+  return out;
+}
+
+/** "PAY-1 → needs_input" style text for one event. */
+export function describeEvent(e: LogEvent): string {
+  const p = e.payload;
+  const s = (k: string) => (typeof p[k] === "string" ? (p[k] as string) : "");
+  const change = () => `${s("from") || "none"} → ${s("to")}${s("reason") ? `: ${s("reason")}` : ""}`;
+  switch (e.type) {
+    case "ticket.state_changed":
+    case "execution.state_changed":
+      return change();
+    case "run.started":
+      return `run ${String(p.number ?? "")} started`;
+    case "run.paused":
+    case "run.resumed":
+    case "run.completed":
+    case "run.cancelled":
+      return `${e.type.slice(4)}${s("reason") ? `: ${s("reason")}` : ""}`;
+    case "status":
+      return s("message");
+    case "finding":
+      return `${s("severity")}${p.blocking ? " blocking" : ""}: ${s("title")}`;
+    case "artifact":
+      return `${s("kind")} ${s("ref")}`.trim();
+    case "ask":
+    case "question.opened":
+      return s("question");
+    case "question.answered":
+      return `answered: ${s("answer")}`;
+    case "done":
+      return s("summary") || "done";
+    case "fail":
+    case "execution.failed":
+    case "execution.killed":
+      return s("reason");
+    case "execution.created":
+      return `${s("profile")} ${kindWords(s("kind"), Number(p.round ?? 0))}, attempt ${String(p.attempt ?? 1)}`;
+    case "execution.nudged":
+      return `nudge ${String(p.nudge ?? "")}`;
+    case "pr.created":
+      return `PR #${String(p.number)} ${p.draft ? "(draft) " : ""}${s("head")} → ${s("base")}`;
+    case "pr.updated":
+      return `PR #${String(p.number)} ${["state", "approvals", "draft", "base", "needs_rebase"]
+        .filter((k) => p[k] !== undefined)
+        .map((k) => `${k} ${String(p[k])}`)
+        .join(", ")}`;
+    case "delivery.failed":
+      return `${s("step")}: ${s("reason")}`;
+    case "agent.event_rejected":
+    case "command.rejected":
+      return `${s("event_type") || s("command")}: ${s("reason")}`;
+    case "command.applied":
+      return s("command");
+    case "jira.updated":
+      return [p.transition ? `moved to ${s("transition")}` : "", p.comment ? "commented" : ""]
+        .filter(Boolean)
+        .join(", ");
+    case "ticket.attention_added":
+    case "ticket.attention_removed":
+      return s("kind");
+    default:
+      return "";
+  }
+}
+
+export type EventRow = {
+  id: string;
+  /** "10:25:13" (UTC), and the date for the first row of a day. */
+  time: string;
+  date: string;
+  ticket: string;
+  type: string;
+  text: string;
+  kinds: EventKind[];
+  tone: Tone;
+  /** The full text lives in attachments/ and retention removed it. */
+  removed: boolean;
+};
+
+export type EventFilter = { ticket: string | null; kind: EventKind | null };
+
+/** The tickets that appear in the events, for the filter. */
+export const eventTickets = (events: Pick<LogEvent, "ticket">[]): string[] =>
+  [...new Set(events.flatMap((e) => (e.ticket ? [e.ticket] : [])))].sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true }),
+  );
+
+/** How many rows Activity draws at once; the newest are kept. */
+export const EVENT_LIMIT = 300;
+
+/**
+ * The event log as rows, oldest first so the newest is last, narrowed by ticket and kind.
+ * DECISION: `agent.event_accepted` is bookkeeping (the accepted agent event is its own row just
+ * before it), so it is left out. A `body_ref` or artifact reference reads "removed after 90 days"
+ * once the run's attachments were pruned, instead of pointing at a file that isn't there.
+ */
+export function eventRows(
+  events: LogEvent[],
+  filter: EventFilter,
+  pruned: boolean,
+): { rows: EventRow[]; total: number } {
+  const matching = events.filter(
+    (e) =>
+      e.type !== "agent.event_accepted" &&
+      (!filter.ticket || e.ticket === filter.ticket) &&
+      (!filter.kind || eventKinds(e).includes(filter.kind)),
+  );
+  const rows = matching.slice(-EVENT_LIMIT).map((e): EventRow => {
+    const kinds = eventKinds(e);
+    const ref = typeof e.payload.body_ref === "string" ? e.payload.body_ref : null;
+    const removed = pruned && (ref !== null || e.type === "artifact");
+    let text = describeEvent(e);
+    if (removed) text += `${text ? " " : ""}(full text removed after ${RETENTION_DAYS} days)`;
+    else if (ref) text += ` (full text in ${ref})`;
+    return {
+      id: e.id,
+      time: e.ts.slice(11, 19),
+      date: e.ts.slice(0, 10),
+      ticket: e.ticket ?? "",
+      type: e.type,
+      text,
+      kinds,
+      tone: kinds.includes("error") ? "blocked" : kinds.includes("question") ? "idle" : "muted",
+      removed,
+    };
+  });
+  return { rows, total: matching.length };
+}
+
+// --- Agent profile editor (Phase 7)
+
+export const HARNESSES = ["claude-code", "cursor"] as const;
+export const ROLE_OPTIONS = ["developer", "reviewer", "analyst"] as const;
+
+/** A profile as the editor holds it: every field as text or a flag, so half-typed input is fine. */
+export type ProfileDraft = {
+  /** True for a new or duplicated profile (its id and role can be set); false when editing a saved one. */
+  isNew: boolean;
+  id: string;
+  name: string;
+  role: Profile["role"];
+  harness: string;
+  model: string;
+  /** One argument per line, written with `\n` between lines (see encodeLines). */
+  args: string;
+  instructions: string;
+  write_worktree: boolean;
+  shell: boolean;
+  network: boolean;
+  timeout_min: string;
+  max_attempts: string;
+};
+
+/**
+ * DECISION: gpui-kit's `Input` is single-line only (docs/herdr/gpui-kit.d.ts has no multi-line
+ * state), so "one per line" and multi-line text are written in one line with `\n` marking a line
+ * break and `\\` a backslash. These two functions convert both ways.
+ */
+export const encodeLines = (text: string): string =>
+  text.replaceAll("\\", "\\\\").replaceAll("\r\n", "\n").replaceAll("\n", "\\n");
+export const decodeLines = (text: string): string =>
+  text.replaceAll(/\\(\\|n)/g, (_m, c: string) => (c === "n" ? "\n" : "\\"));
+
+export const blankDraft = (role: Profile["role"] = "developer"): ProfileDraft => ({
+  isNew: true,
+  id: "",
+  name: "",
+  role,
+  harness: "claude-code",
+  model: "sonnet",
+  args: "",
+  instructions: "",
+  write_worktree: role === "developer",
+  shell: true,
+  network: false,
+  timeout_min: "60",
+  max_attempts: "2",
+});
+
+export const draftOf = (p: Profile): ProfileDraft => ({
+  isNew: false,
+  id: p.id,
+  name: p.name,
+  role: p.role,
+  harness: p.harness,
+  model: p.model,
+  args: encodeLines(p.args.join("\n")),
+  instructions: encodeLines(p.instructions),
+  write_worktree: p.permissions.write_worktree,
+  shell: p.permissions.shell,
+  network: p.permissions.network,
+  timeout_min: String(p.timeout_min),
+  max_attempts: String(p.max_attempts),
+});
+
+/** "Security reviewer!" -> "security-reviewer": a slug for the id when none was typed. */
+export const slugify = (name: string): string =>
+  name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
+
+/** A copy of a profile: a new id (`-copy`, `-copy-2`, ...) and name, ready to edit and save. */
+export function duplicateDraft(p: Profile, existingIds: string[]): ProfileDraft {
+  let id = `${p.id}-copy`;
+  for (let n = 2; existingIds.includes(id); n++) id = `${p.id}-copy-${n}`;
+  return { ...draftOf(p), isNew: true, id, name: `${p.name} (copy)` };
+}
+
+const wholeNumber = (text: string): number => (/^\s*\d+\s*$/.test(text) ? Number(text) : Number.NaN);
+
+/**
+ * Checks a draft with the schema's `validateProfile` and builds the whole profile object for
+ * `profile.save`: `v`, `id`, everything, and a fresh `updated_at`. The issues are the schema's own
+ * messages (naming each field), plus one for a new profile whose id is already taken.
+ */
+export function buildProfile(
+  d: ProfileDraft,
+  existingIds: string[],
+  nowIso: string,
+): { ok: true; profile: Profile } | { ok: false; issues: string[] } {
+  const id = d.id.trim() || slugify(d.name);
+  const candidate = {
+    v: 1,
+    id,
+    name: d.name.trim(),
+    role: d.role,
+    harness: d.harness,
+    model: d.model.trim(),
+    args: decodeLines(d.args)
+      .split("\n")
+      .map((a) => a.trim())
+      .filter(Boolean),
+    instructions: decodeLines(d.instructions),
+    permissions: { write_worktree: d.write_worktree, shell: d.shell, network: d.network },
+    timeout_min: wholeNumber(d.timeout_min),
+    max_attempts: wholeNumber(d.max_attempts),
+    updated_at: `${nowIso.slice(0, 19)}Z`,
+  };
+  const r = validateProfile(candidate);
+  const issues = r.ok ? [] : r.issues.map((i) => formatIssues([i]));
+  if (d.isNew && existingIds.includes(id))
+    issues.push(`id: a profile called "${id}" already exists; pick another id, or edit that one.`);
+  if (!HARNESSES.includes(d.harness as (typeof HARNESSES)[number]))
+    issues.push(`harness: must be one of ${HARNESSES.join(", ")}.`);
+  return issues.length || !r.ok ? { ok: false, issues } : { ok: true, profile: r.value };
+}
+
+export const saveProfileAction = (p: Profile): Action => ({
+  id: `save-profile-${p.id}`,
+  label: "Save profile",
+  command: "profile.save",
+  args: p as unknown as Record<string, unknown>,
 });

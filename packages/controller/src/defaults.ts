@@ -43,6 +43,22 @@ export const DEFAULT_PROFILES: Profile[] = [
     permissions: { write_worktree: true, shell: true, network: false },
     timeout_min: 60,
   },
+  {
+    // The second harness (Phase 7): the same job as `developer`, run by Cursor. Its model is a
+    // placeholder to set in the profile editor (`agent models` lists them). No `--force`: Cursor has no
+    // allowlist, so a person decides whether to let it run commands unasked (add it in the profile).
+    ...base,
+    id: "developer-cursor",
+    name: "Developer (Cursor)",
+    role: "developer",
+    harness: "cursor",
+    model: "auto",
+    args: [],
+    instructions:
+      "You are a careful senior software engineer. Match the style of the code around you, keep the change small and focused on the ticket, and add or update tests. Commit your work on the ticket branch before you report it done.",
+    permissions: { write_worktree: true, shell: true, network: false },
+    timeout_min: 60,
+  },
   reviewer(
     "security-reviewer",
     "Security reviewer",

@@ -4,10 +4,11 @@
 // DECISION: the mod runs `collie` and `collie-controller` from the user's PATH (`make install`
 // puts them in ~/.local/bin), and uses ~/.collie: a mod can't read the user's environment.
 
-import type { Board, StateFile } from "@collie/schema";
+import type { Board, Profile, StateFile } from "@collie/schema";
+import { validateProfile } from "@collie/schema";
 import { readdir } from "fs/promises";
 import { exec, hc, home, props, readTextFile } from "herdr";
-import type { RunView } from "./model.ts";
+import { type LogEvent, parseEvents, type RunRecord, type RunView } from "./model.ts";
 
 // DECISION: a tab opened with the prop `collie_home` reads that folder instead of ~/.collie, so the
 // UI can be tried against a hand-made home (`tab.new --mod collie --props '{"collie_home":"…"}'`).
@@ -46,7 +47,7 @@ export async function loadBoards(): Promise<Board[]> {
 
 /**
  * The board's run to show: the one in progress, else the most recent. Read from run.json and
- * state.json, which the controller writes; the mod never reads events.jsonl.
+ * state.json, which the controller writes; events.jsonl is read only by the Activity view.
  */
 export async function loadRun(boardId: string): Promise<RunView | null> {
   let ids: string[] = [];
@@ -104,6 +105,81 @@ export async function loadWorkflows(): Promise<{ id: string; name: string }[]> {
   return all
     .flatMap((w) => (w?.id ? [{ id: w.id, name: w.name ?? w.id }] : []))
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** The agent profiles in ~/.collie/profiles, by id. A file that doesn't validate is left out. */
+export async function loadProfiles(): Promise<Profile[]> {
+  let files: string[] = [];
+  try {
+    files = await readdir(`${collieHome()}/profiles`);
+  } catch {
+    return [];
+  }
+  const all = await Promise.all(
+    files.filter((f) => f.endsWith(".json")).map((f) => readJson<unknown>(`${collieHome()}/profiles/${f}`)),
+  );
+  return all
+    .flatMap((p) => {
+      const r = validateProfile(p);
+      return r.ok ? [r.value] : [];
+    })
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * Every run of a board, for the Activity view: run.json's header, state.json, and whether
+ * inbox.jsonl is still there (retention removes it 90 days after a run ends).
+ */
+export async function loadRuns(boardId: string): Promise<RunRecord[]> {
+  let ids: string[] = [];
+  try {
+    ids = await readdir(`${collieHome()}/runs`);
+  } catch {
+    return [];
+  }
+  const all = await Promise.all(
+    ids.map(async (id): Promise<RunRecord | null> => {
+      const r = await readJson<{
+        id: string;
+        board_id: string;
+        number: number;
+        status: RunRecord["status"];
+        started_at: string;
+        ended_at: string | null;
+        end_reason: string | null;
+        carried_over_from: string | null;
+      }>(`${collieHome()}/runs/${id}/run.json`);
+      if (!r || r.board_id !== boardId) return null;
+      const state = await readJson<StateFile>(`${collieHome()}/runs/${id}/state.json`);
+      let files: string[] = [];
+      try {
+        files = await readdir(`${collieHome()}/runs/${id}`);
+      } catch {}
+      return {
+        id: r.id,
+        number: r.number,
+        boardId,
+        status: state?.status ?? r.status,
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        endReason: r.end_reason,
+        carriedOverFrom: r.carried_over_from,
+        state,
+        hasInbox: files.includes("inbox.jsonl"),
+      };
+    }),
+  );
+  return all.filter((r): r is RunRecord => !!r);
+}
+
+/** A run's full event history: the one place the mod reads events.jsonl (the Activity view). */
+export async function loadRunEvents(runId: string): Promise<LogEvent[]> {
+  try {
+    const text = await readTextFile(`${collieHome()}/runs/${runId}/events.jsonl`);
+    return text ? parseEvents(text) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Whether a live controller holds controller.lock. */

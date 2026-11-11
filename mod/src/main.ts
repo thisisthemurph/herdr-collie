@@ -2,7 +2,7 @@
 // It holds no state of its own beyond what's on screen: boards come from ~/.collie, changes go
 // through `collie ctl`, and the folder watch redraws it, so reloading the mod loses nothing.
 
-import type { Board, StateFile } from "@collie/schema";
+import type { Board, Profile, StateFile } from "@collie/schema";
 import { h_flex, Input, InputState, v_flex } from "gpui-base";
 import { div, PathBuilder, View } from "gpui-kit";
 import { props as herdrProps, run as herdrRun, notify, panes, theme, watchFolder } from "herdr";
@@ -13,7 +13,10 @@ import {
   ensureController,
   loadBoards,
   loadPrep,
+  loadProfiles,
   loadRun,
+  loadRunEvents,
+  loadRuns,
   loadWorkflows,
 } from "./collie.ts";
 import {
@@ -21,12 +24,24 @@ import {
   alerts,
   answerAction,
   type BoardModel,
+  blankDraft,
   boardModel,
+  buildProfile,
   COMPLETE_AT_LABEL,
   COMPLETE_AT_OPTIONS,
+  defaultActivityRun,
+  deleteRun,
   describeReply,
+  draftOf,
+  duplicateDraft,
+  EVENT_KIND_LABEL,
+  EVENT_KINDS,
+  EVENT_LIMIT,
+  type EventFilter,
   type ExecView,
   type ExternalRow,
+  eventRows,
+  eventTickets,
   excludeAction,
   execChipLabel,
   execLine,
@@ -34,16 +49,22 @@ import {
   type FindingRow,
   findingRows,
   findingTickets,
+  HARNESSES,
   investigateAction,
   investigateTargets,
   jiraStepsText,
+  type LogEvent,
+  metricsLines,
   type NeedAction,
   type NeedItem,
+  needsConfirm,
   needsYou,
+  newRunFrom,
   nextPreparation,
   nextWorkflow,
   PR_DRAFT_LABEL,
   PR_DRAFT_OPTIONS,
+  type ProfileDraft,
   type PrRow,
   parseImport,
   prBadges,
@@ -52,10 +73,16 @@ import {
   prStateTone,
   type QuestionRow,
   questionRows,
+  ROLE_OPTIONS,
+  type RunHistoryRow,
   type RunModel,
+  type RunRecord,
   type RunView,
+  runHistory,
+  runMetrics,
   runModel,
   type Summaries,
+  saveProfileAction,
   settingAction,
   startAction,
   summariesOf,
@@ -66,7 +93,7 @@ import {
   watchCommand,
 } from "./model.ts";
 
-type Screen = "setup" | "graph" | "findings" | "questions" | "new";
+type Screen = "setup" | "graph" | "findings" | "questions" | "activity" | "profiles" | "new";
 /** Herdr's theme colors are hex strings; gpui-kit types colors as `#...`. */
 type Theme = Record<string, `#${string}`>;
 const colors = () => theme() as unknown as Theme;
@@ -105,6 +132,18 @@ export default class Collie extends View {
   sending = false;
   /** The Findings tab's ticket filter; null shows every ticket. */
   findingsFilter: string | null = null;
+  /** Activity: every run of the board, the one open, its events (read on demand) and the filters. */
+  runs: RunRecord[] = [];
+  activityRun: string | null = null;
+  events: LogEvent[] = [];
+  eventFilter: EventFilter = { ticket: null, kind: null };
+  /** The id of a cancel or delete button that was pressed once and waits for its Yes. */
+  confirming: string | null = null;
+  /** Agent profiles (~/.collie/profiles), the one being edited and why it can't be saved yet. */
+  profiles: Profile[] = [];
+  editing: ProfileDraft | null = null;
+  profileIssues: string[] = [];
+  pf!: Record<"id" | "name" | "model" | "args" | "instructions" | "timeout" | "attempts", InputState>;
 
   init(_initArg: unknown, cx: El) {
     // Where you were: the last screen, board and selection, so reloading the mod puts you back.
@@ -128,6 +167,15 @@ export default class Collie extends View {
       slug: InputState.new({ placeholder: "Repository slug" }),
       branch: InputState.new({ placeholder: "Default branch", value: "main" }),
       path: InputState.new({ placeholder: "Local checkout, e.g. ~/code/payments" }),
+    };
+    this.pf = {
+      id: InputState.new({ placeholder: "id, e.g. frontend-reviewer (lowercase, dashes)" }),
+      name: InputState.new({ placeholder: "Name, e.g. Frontend reviewer" }),
+      model: InputState.new({ placeholder: "Model, e.g. sonnet" }),
+      args: InputState.new({ placeholder: "Extra arguments, separated by \\n" }),
+      instructions: InputState.new({ placeholder: "Instructions (a line break is written \\n)" }),
+      timeout: InputState.new({ placeholder: "30" }),
+      attempts: InputState.new({ placeholder: "2" }),
     };
     cx.spawn(async (cx: El) => {
       const err = await ensureController();
@@ -211,6 +259,14 @@ export default class Collie extends View {
     this.runView = this.boardId ? await loadRun(this.boardId) : null;
     this.prep = this.boardId ? await loadPrep(this.boardId) : null;
     this.workflows = await loadWorkflows();
+    // The Activity and Profiles screens read more of ~/.collie, so only while they are open.
+    if (this.screen === "activity" && this.boardId) {
+      this.runs = await loadRuns(this.boardId);
+      const rows = runHistory(this.runs, Date.now());
+      if (!rows.some((r) => r.id === this.activityRun)) this.activityRun = defaultActivityRun(rows);
+      this.events = this.activityRun ? await loadRunEvents(this.activityRun) : [];
+    }
+    if (this.screen === "profiles") this.profiles = await loadProfiles();
     // Notifications: only what changed since the last look, never what was there when the mod opened.
     if (before && this.runView)
       for (const a of alerts(before, this.runView, summariesOf(this.board))) this.announce(a);
@@ -236,6 +292,7 @@ export default class Collie extends View {
   run(cx: El, command: string, args: Record<string, unknown>, after?: (ok: boolean) => void) {
     if (this.busy) return;
     this.busy = true;
+    this.confirming = null;
     this.message = { text: `${command}…`, error: false };
     cx.notify();
     cx.spawn(async (cx: El) => {
@@ -347,7 +404,11 @@ export default class Collie extends View {
                   ? this.findingsView(t, summaries)
                   : this.screen === "questions"
                     ? this.questionsView(t, summaries)
-                    : this.setup(t, board, model, run),
+                    : this.screen === "activity"
+                      ? this.activityView(t, board, model, summaries)
+                      : this.screen === "profiles"
+                        ? this.profilesView(t)
+                        : this.setup(t, board, model, run),
           ),
       )
       .when(!!this.dialog, (el: El) => el.child(this.dialogView(t, summaries)));
@@ -427,7 +488,13 @@ export default class Collie extends View {
         .text_color(this.screen === id ? t.foreground : t.muted)
         .on_click((_e: unknown, cx: El) => {
           this.screen = id;
+          this.confirming = null;
           cx.notify();
+          if (id === "activity" || id === "profiles")
+            cx.spawn(async (cx: El) => {
+              await this.reload();
+              cx.notify();
+            });
         })
         .child(label);
     const st = this.runView?.state;
@@ -445,7 +512,9 @@ export default class Collie extends View {
           .child(tab("setup", "Board setup"))
           .child(tab("graph", "Graph"))
           .child(tab("findings", openFindings ? `Findings (${openFindings})` : "Findings"))
-          .child(tab("questions", openQuestions ? `Questions (${openQuestions})` : "Questions")),
+          .child(tab("questions", openQuestions ? `Questions (${openQuestions})` : "Questions"))
+          .child(tab("activity", "Activity"))
+          .child(tab("profiles", "Agent profiles")),
       );
   }
 
@@ -651,6 +720,26 @@ export default class Collie extends View {
         ),
       )
       .when(!!run?.active, (el: El) => el.children(this.actionButtons(t, run?.actions ?? [])))
+      .when(!!run && !run.active, (el: El) => {
+        // The last run ended: start the next one with its completed tickets carried over.
+        const nr = newRunFrom(
+          board.id,
+          { id: (run as RunModel).id, active: false, number: (run as RunModel).number },
+          m.startBlocked,
+          null,
+        );
+        return nr
+          ? el.child(
+              button(
+                t,
+                nr.action.id,
+                `New run from run ${(run as RunModel).number}`,
+                !!nr.disabled || this.busy || !this.alive,
+                (cx: El) => this.run(cx, nr.action.command, nr.action.args),
+              ),
+            )
+          : el;
+      })
       .child(
         div()
           .text_size(12)
@@ -1024,9 +1113,9 @@ export default class Collie extends View {
   }
 
   needButton(t: Theme, a: NeedAction): El {
-    return button(t, a.id, a.label, a.type === "ctl" && this.busy, (cx: El) => {
+    if (a.type === "ctl") return this.actionButton(t, { ...a }, a.id);
+    return button(t, a.id, a.label, false, (cx: El) => {
       if (a.type === "answer") this.openDialog(a.scope, a.questionId, cx);
-      else if (a.type === "ctl") this.run(cx, a.command, a.args);
       else this.watchTerminal(a.terminal);
     });
   }
@@ -1242,11 +1331,7 @@ export default class Collie extends View {
           .child(div().text_size(11).text_color(t.dim).child("Agents"))
           .children(rt.executions.map((e) => this.execRow(t, e))),
       )
-      .children(
-        ticketRunActions(run.id, rt).map((a) =>
-          button(t, `insp-${a.id}`, a.label, this.busy, (cx: El) => this.run(cx, a.command, a.args)),
-        ),
-      );
+      .children(ticketRunActions(run.id, rt, run.status).map((a) => this.actionButton(t, a, `insp-${a.id}`)));
   }
 
   /** One agent: where it is, what it said, and a button to watch its terminal. */
@@ -1596,11 +1681,599 @@ export default class Collie extends View {
       );
   }
 
+  // --- Activity: run history, metrics and the event log (Phase 7)
+
+  /** Pick a run in the history; its events are read now and kept fresh by the folder watch. */
+  openRun(id: string, cx: El) {
+    this.activityRun = id;
+    this.eventFilter = { ticket: null, kind: null };
+    this.confirming = null;
+    this.events = [];
+    cx.notify();
+    cx.spawn(async (cx: El) => {
+      this.events = await loadRunEvents(id);
+      cx.notify();
+    });
+  }
+
+  activityView(t: Theme, board: Board, m: BoardModel, summaries: Summaries): El {
+    const rows = runHistory(this.runs, Date.now());
+    const sel = rows.find((r) => r.id === this.activityRun) ?? null;
+    const rec = this.runs.find((r) => r.id === this.activityRun) ?? null;
+    return h_flex()
+      .size_full()
+      .child(
+        v_flex()
+          .id("run-history")
+          .w(300)
+          .h_full()
+          .flex_none()
+          .overflow_y_scrollbar()
+          .p(14)
+          .gap(8)
+          .border_r(1)
+          .border_color(t.border)
+          .child(section(t, `Run history (${rows.length})`))
+          .when(rows.length === 0, (el: El) =>
+            el.child(
+              div().text_size(13).text_color(t.muted).child("No runs yet. Start one from Board setup."),
+            ),
+          )
+          .children(rows.map((r) => this.runCard(t, r, r.id === this.activityRun))),
+      )
+      .child(
+        sel && rec
+          ? this.runDetail(t, board, m, sel, rec, summaries)
+          : div().p(16).text_size(13).text_color(t.muted).child("Select a run."),
+      );
+  }
+
+  runCard(t: Theme, r: RunHistoryRow, selected: boolean): El {
+    return v_flex()
+      .id(`run-card-${r.id}`)
+      .gap(3)
+      .p(10)
+      .rounded(6)
+      .border(1)
+      .border_color(selected ? t.accent : t.border)
+      .bg(selected ? t.selected : t.surface)
+      .cursor_pointer()
+      .hover((h: El) => h.bg(t.hover))
+      .on_click((_e: unknown, cx: El) => this.openRun(r.id, cx))
+      .child(
+        h_flex()
+          .gap(8)
+          .items_center()
+          .child(div().text_size(13).font_semibold().child(r.title))
+          .child(div().flex_1())
+          .child(toneBadge(t, r.tone, r.status)),
+      )
+      .child(div().text_size(11).text_color(t.muted).child(r.when))
+      .child(
+        div()
+          .text_size(12)
+          .child(`${r.tickets}${r.prs ? ` · ${r.prs} PR${r.prs === 1 ? "" : "s"}` : ""}`),
+      )
+      .when(!!r.endReason, (el: El) =>
+        el.child(
+          div()
+            .text_size(11)
+            .text_color(t.muted)
+            .truncate()
+            .child(r.endReason ?? ""),
+        ),
+      )
+      .when(r.carriedFrom !== null, (el: El) =>
+        el.child(div().text_size(11).text_color(t.dim).child(`carried over from run ${r.carriedFrom}`)),
+      );
+  }
+
+  runDetail(
+    t: Theme,
+    board: Board,
+    m: BoardModel,
+    r: RunHistoryRow,
+    rec: RunRecord,
+    summaries: Summaries,
+  ): El {
+    const metrics = metricsLines(runMetrics(this.events));
+    const filter = this.eventFilter;
+    const tickets = eventTickets(this.events);
+    const log = eventRows(this.events, filter, r.pruned);
+    const view: RunView | null = rec.state
+      ? {
+          id: rec.id,
+          number: rec.number,
+          status: rec.status,
+          boardId: rec.boardId,
+          state: rec.state,
+          profiles: this.runView?.id === rec.id ? this.runView.profiles : undefined,
+        }
+      : null;
+    const model = runModel(view, summaries);
+    const active = this.runs.find((x) => x.status === "running" || x.status === "paused");
+    const nr = newRunFrom(
+      board.id,
+      r,
+      m.startBlocked,
+      active ? { number: active.number, status: active.status } : null,
+    );
+    const del = deleteRun(r);
+    const filterPill = (id: string, label: string, on: boolean, set: () => void) =>
+      pill(t, id, label, on, (cx: El) => {
+        set();
+        cx.notify();
+      });
+    return v_flex()
+      .id("run-detail")
+      .flex_1()
+      .min_w(0)
+      .h_full()
+      .overflow_y_scrollbar()
+      .p(16)
+      .gap(12)
+      .child(
+        h_flex()
+          .gap(10)
+          .items_center()
+          .child(div().text_size(15).font_semibold().child(`${r.title} · ${r.status}`))
+          .child(div().text_size(12).text_color(t.muted).child(r.when))
+          .child(div().flex_1())
+          .when(!!nr, (el: El) => {
+            const n = nr as NonNullable<typeof nr>;
+            return el.child(
+              button(t, n.action.id, n.action.label, !!n.disabled || this.busy || !this.alive, (cx: El) =>
+                this.run(cx, n.action.command, n.action.args),
+              ),
+            );
+          })
+          .child(this.actionButton(t, del.action, del.action.id, !!del.disabled)),
+      )
+      .when(!!nr?.disabled, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(`New run from this run is unavailable: ${nr?.disabled}`),
+        ),
+      )
+      .when(!!r.endReason, (el: El) =>
+        el.child(div().text_size(12).text_color(t.muted).child(`Ended: ${r.endReason}`)),
+      )
+      .when(r.openPrs > 0, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(
+              `${r.openPrs} pull request${r.openPrs === 1 ? " is" : "s are"} still open: the run can't be deleted until ${r.openPrs === 1 ? "it is" : "they are"} merged or declined.`,
+            ),
+        ),
+      )
+      .when(r.pruned, (el: El) =>
+        el.child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(
+              "Inbox and attachments were removed after 90 days; the events below are complete, but long bodies are no longer available.",
+            ),
+        ),
+      )
+      .child(section(t, "Metrics"))
+      .child(
+        h_flex()
+          .gap(10)
+          .flex_wrap()
+          .children(
+            metrics.map((x) =>
+              v_flex()
+                .gap(2)
+                .p(10)
+                .w(200)
+                .rounded(6)
+                .border(1)
+                .border_color(t.border)
+                .bg(t.surface)
+                .child(div().text_size(11).text_color(t.dim).child(x.label))
+                .child(div().text_size(15).font_semibold().child(x.value)),
+            ),
+          ),
+      )
+      .when(!!model && Object.keys(model.tickets).length > 0, (el: El) =>
+        el.child(section(t, "Tickets")).child(this.activityTickets(t, model as RunModel, summaries)),
+      )
+      .child(
+        section(t, `Events (${log.total}${log.total > EVENT_LIMIT ? `, newest ${EVENT_LIMIT} shown` : ""})`),
+      )
+      .child(
+        h_flex()
+          .gap(6)
+          .flex_wrap()
+          .child(
+            filterPill("ev-all", "All kinds", filter.kind === null, () => {
+              this.eventFilter = { ...filter, kind: null };
+            }),
+          )
+          .children(
+            EVENT_KINDS.map((k) =>
+              filterPill(`ev-${k}`, EVENT_KIND_LABEL[k], filter.kind === k, () => {
+                this.eventFilter = { ...filter, kind: k };
+              }),
+            ),
+          ),
+      )
+      .when(tickets.length > 0, (el: El) =>
+        el.child(
+          h_flex()
+            .gap(6)
+            .flex_wrap()
+            .child(
+              filterPill("evt-all", "All tickets", filter.ticket === null, () => {
+                this.eventFilter = { ...filter, ticket: null };
+              }),
+            )
+            .children(
+              tickets.map((k) =>
+                filterPill(`evt-${k}`, k, filter.ticket === k, () => {
+                  this.eventFilter = { ...filter, ticket: k };
+                }),
+              ),
+            ),
+        ),
+      )
+      .when(log.rows.length === 0, (el: El) =>
+        el.child(div().text_size(13).text_color(t.muted).child("No events match.")),
+      )
+      .child(
+        v_flex()
+          .gap(2)
+          .children(
+            log.rows.map((e) =>
+              h_flex()
+                .id(`ev-row-${e.id}`)
+                .gap(8)
+                .text_size(12)
+                .child(div().w(62).flex_none().text_color(t.dim).child(e.time))
+                .child(div().w(64).flex_none().font_semibold().child(e.ticket))
+                .child(div().w(150).flex_none().truncate().text_color(tone(t, e.tone)).child(e.type))
+                .child(div().flex_1().min_w(0).text_color(t.muted).child(e.text)),
+            ),
+          ),
+      );
+  }
+
+  /** The tickets of the open run with their state and, while it is active, retry and cancel buttons. */
+  activityTickets(t: Theme, run: RunModel, summaries: Summaries): El {
+    return v_flex()
+      .gap(4)
+      .children(
+        Object.values(run.tickets)
+          .sort((a, b) => a.key.localeCompare(b.key, undefined, { numeric: true }))
+          .map((rt) =>
+            h_flex()
+              .id(`act-ticket-${rt.key}`)
+              .gap(8)
+              .items_center()
+              .text_size(12)
+              .child(div().w(70).font_semibold().child(rt.key))
+              .child(
+                div()
+                  .flex_1()
+                  .min_w(0)
+                  .truncate()
+                  .text_color(t.muted)
+                  .child(summaries[rt.key] ?? ""),
+              )
+              .child(toneBadge(t, rt.tone, rt.label))
+              .children(
+                ticketRunActions(run.id, rt, run.status).map((a) => this.actionButton(t, a, `act-${a.id}`)),
+              ),
+          ),
+      );
+  }
+
+  // --- Agent profiles (Phase 7)
+
+  /** Opens a draft in the editor: the text fields are set from it, and the issues cleared. */
+  edit(d: ProfileDraft | null, cx: El) {
+    this.editing = d;
+    this.profileIssues = [];
+    if (d) {
+      this.pf.id?.set_value(d.id);
+      this.pf.name?.set_value(d.name);
+      this.pf.model?.set_value(d.model);
+      this.pf.args?.set_value(d.args);
+      this.pf.instructions?.set_value(d.instructions);
+      this.pf.timeout?.set_value(d.timeout_min);
+      this.pf.attempts?.set_value(d.max_attempts);
+    }
+    cx.notify();
+  }
+
+  /** The draft with whatever is typed in the fields. */
+  typedDraft(): ProfileDraft | null {
+    const d = this.editing;
+    if (!d) return null;
+    return {
+      ...d,
+      id: this.pf.id?.value() ?? d.id,
+      name: this.pf.name?.value() ?? d.name,
+      model: this.pf.model?.value() ?? d.model,
+      args: this.pf.args?.value() ?? d.args,
+      instructions: this.pf.instructions?.value() ?? d.instructions,
+      timeout_min: this.pf.timeout?.value() ?? d.timeout_min,
+      max_attempts: this.pf.attempts?.value() ?? d.max_attempts,
+    };
+  }
+
+  /** Validates with the schema, then sends the whole profile; issues stay on screen until fixed. */
+  saveProfile(cx: El) {
+    const d = this.typedDraft();
+    if (!d) return;
+    const r = buildProfile(
+      d,
+      this.profiles.map((p) => p.id),
+      new Date().toISOString(),
+    );
+    if (!r.ok) {
+      this.profileIssues = r.issues;
+      cx.notify();
+      return;
+    }
+    this.profileIssues = [];
+    const a = saveProfileAction(r.profile);
+    this.run(cx, a.command, a.args, (ok) => {
+      if (ok) {
+        // Reload put it in the list; keep it open as a saved profile.
+        this.editing = draftOf(r.profile);
+        this.message = { text: `Saved profile ${r.profile.name}.`, error: false };
+      }
+    });
+  }
+
+  profilesView(t: Theme): El {
+    const d = this.editing;
+    const ids = this.profiles.map((p) => p.id);
+    const toggle = (id: string, label: string, on: boolean, set: (v: boolean) => void) =>
+      h_flex()
+        .id(id)
+        .gap(8)
+        .items_center()
+        .text_size(12)
+        .cursor_pointer()
+        .on_click((_e: unknown, cx: El) => {
+          set(!on);
+          cx.notify();
+        })
+        .child(
+          div()
+            .w(14)
+            .h(14)
+            .rounded(3)
+            .border(1)
+            .border_color(t.input)
+            .bg(on ? t.accent : t.surface)
+            .text_color(t.accent_foreground)
+            .text_size(10)
+            .child(on ? "✓" : ""),
+        )
+        .child(label);
+    const list = v_flex()
+      .id("profile-list")
+      .w(300)
+      .h_full()
+      .flex_none()
+      .overflow_y_scrollbar()
+      .p(14)
+      .gap(8)
+      .border_r(1)
+      .border_color(t.border)
+      .child(
+        h_flex()
+          .items_center()
+          .child(section(t, `Agent profiles (${this.profiles.length})`))
+          .child(div().flex_1())
+          .child(button(t, "new-profile", "New profile", false, (cx: El) => this.edit(blankDraft(), cx))),
+      )
+      .when(this.profiles.length === 0, (el: El) =>
+        el.child(div().text_size(13).text_color(t.muted).child("No profiles found in ~/.collie/profiles.")),
+      )
+      .children(
+        this.profiles.map((p) => {
+          const open = !!d && !d.isNew && d.id === p.id;
+          return v_flex()
+            .id(`profile-${p.id}`)
+            .gap(3)
+            .p(10)
+            .rounded(6)
+            .border(1)
+            .border_color(open ? t.accent : t.border)
+            .bg(open ? t.selected : t.surface)
+            .cursor_pointer()
+            .hover((h: El) => h.bg(t.hover))
+            .on_click((_e: unknown, cx: El) => this.edit(draftOf(p), cx))
+            .child(div().text_size(13).font_semibold().child(p.name))
+            .child(div().text_size(11).text_color(t.muted).child(`${p.role} · ${p.harness} · ${p.model}`))
+            .child(
+              h_flex().child(
+                button(t, `dup-${p.id}`, "Duplicate", false, (cx: El) =>
+                  this.edit(duplicateDraft(p, ids), cx),
+                ),
+              ),
+            );
+        }),
+      );
+    const editor = (e: ProfileDraft): El =>
+      v_flex()
+        .id("profile-editor")
+        .flex_1()
+        .min_w(0)
+        .h_full()
+        .overflow_y_scrollbar()
+        .p(16)
+        .gap(10)
+        .child(
+          div()
+            .text_size(15)
+            .font_semibold()
+            .child(e.isNew ? "New profile" : `Edit ${e.name}`),
+        )
+        .child(
+          div()
+            .text_size(12)
+            .text_color(t.muted)
+            .child(
+              "Each field is one line: write a line break as \\n. A run uses the profile as it was when the run started.",
+            ),
+        )
+        .when(e.isNew, (el: El) =>
+          el.child(field(t, "Id (a slug; blank uses the name)", this.pf.id as InputState)),
+        )
+        .when(!e.isNew, (el: El) => el.child(kv(t, "Id", e.id)))
+        .child(field(t, "Name", this.pf.name as InputState))
+        .child(
+          v_flex()
+            .gap(4)
+            .child(div().text_size(12).text_color(t.muted).child("Role"))
+            .child(
+              e.isNew
+                ? h_flex()
+                    .gap(6)
+                    .children(
+                      ROLE_OPTIONS.map((r) =>
+                        pill(t, `role-${r}`, r, e.role === r, (cx: El) => {
+                          e.role = r;
+                          cx.notify();
+                        }),
+                      ),
+                    )
+                : div().text_size(13).child(`${e.role} (fixed once saved: workflows rely on it)`),
+            ),
+        )
+        .child(
+          v_flex()
+            .gap(4)
+            .child(div().text_size(12).text_color(t.muted).child("Harness"))
+            .child(
+              h_flex()
+                .gap(6)
+                .children(
+                  [...new Set<string>([...HARNESSES, e.harness])].map((hn) =>
+                    pill(t, `harness-${hn}`, hn, e.harness === hn, (cx: El) => {
+                      e.harness = hn;
+                      cx.notify();
+                    }),
+                  ),
+                ),
+            ),
+        )
+        .child(field(t, "Model", this.pf.model as InputState))
+        .child(field(t, "Extra arguments (one per line, written \\n)", this.pf.args as InputState))
+        .child(field(t, "Instructions", this.pf.instructions as InputState))
+        .child(
+          h_flex()
+            .gap(16)
+            .child(
+              toggle("perm-write", "Write to the worktree", e.write_worktree, (v) => {
+                e.write_worktree = v;
+              }),
+            )
+            .child(
+              toggle("perm-shell", "Run shell commands", e.shell, (v) => {
+                e.shell = v;
+              }),
+            )
+            .child(
+              toggle("perm-net", "Use the network", e.network, (v) => {
+                e.network = v;
+              }),
+            ),
+        )
+        .child(
+          h_flex()
+            .gap(12)
+            .child(
+              div()
+                .w(200)
+                .child(field(t, "Timeout (minutes)", this.pf.timeout as InputState)),
+            )
+            .child(
+              div()
+                .w(200)
+                .child(field(t, "Max attempts", this.pf.attempts as InputState)),
+            ),
+        )
+        .when(this.profileIssues.length > 0, (el: El) =>
+          el.child(
+            v_flex()
+              .gap(2)
+              .p(8)
+              .rounded(6)
+              .border(1)
+              .border_color(t.blocked)
+              .text_size(12)
+              .text_color(t.blocked)
+              .children(this.profileIssues.map((i) => div().child(i))),
+          ),
+        )
+        .child(
+          h_flex()
+            .gap(8)
+            .child(
+              button(t, "save-profile", "Save profile", this.busy || !this.alive, (cx: El) =>
+                this.saveProfile(cx),
+              ),
+            )
+            .child(button(t, "close-profile", "Close", false, (cx: El) => this.edit(null, cx))),
+        );
+    return h_flex()
+      .size_full()
+      .child(list)
+      .child(
+        d
+          ? editor(d)
+          : div()
+              .p(16)
+              .text_size(13)
+              .text_color(t.muted)
+              .child("Pick a profile to edit, or create a new one."),
+      );
+  }
+
   /** Buttons for model actions; each runs its `collie ctl` command. */
   actionButtons(t: Theme, actions: Action[]): El[] {
-    return actions.map((a) =>
-      button(t, a.id, a.label, this.busy, (cx: El) => this.run(cx, a.command, a.args)),
-    );
+    return actions.map((a) => this.actionButton(t, a, a.id));
+  }
+
+  /**
+   * One action as a button. A cancel or delete (needsConfirm) first turns into "<label>? Yes No":
+   * the command is sent only on Yes, and any other redraw-causing command clears the question.
+   */
+  actionButton(
+    t: Theme,
+    a: { label: string; command: string; args: Record<string, unknown> },
+    id: string,
+    disabled = false,
+  ): El {
+    if (needsConfirm(a.command) && this.confirming === id)
+      return h_flex()
+        .gap(6)
+        .items_center()
+        .child(div().text_size(12).text_color(t.blocked).child(`${a.label}?`))
+        .child(button(t, `${id}-yes`, "Yes", this.busy, (cx: El) => this.run(cx, a.command, a.args)))
+        .child(
+          button(t, `${id}-no`, "No", false, (cx: El) => {
+            this.confirming = null;
+            cx.notify();
+          }),
+        );
+    return button(t, id, a.label, this.busy || disabled, (cx: El) => {
+      if (needsConfirm(a.command)) {
+        this.confirming = id;
+        cx.notify();
+      } else this.run(cx, a.command, a.args);
+    });
   }
 
   newBoard(t: Theme, first: boolean): El {
@@ -1722,6 +2395,22 @@ function pill(t: Theme, id: string, label: string, active: boolean, onClick: (cx
     .hover((h: El) => h.opacity(0.85))
     .on_click((_e: unknown, cx: El) => onClick(cx))
     .child(label);
+}
+
+function field(t: Theme, label: string, state: InputState): El {
+  return v_flex()
+    .gap(4)
+    .child(div().text_size(12).text_color(t.muted).child(label))
+    .child(
+      div()
+        .h(30)
+        .px(8)
+        .rounded(6)
+        .border(1)
+        .border_color(t.input)
+        .bg(t.surface)
+        .child(Input.new(state).h_full().w_full().text_size(13)),
+    );
 }
 
 function readinessBadge(t: Theme, state: string): El {
