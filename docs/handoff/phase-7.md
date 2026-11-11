@@ -34,7 +34,7 @@
 | `defaults.ts` | The seeded Cursor profile's model, `auto`, is a placeholder, and its arguments are empty: no `--force`, so the agent asks before running commands and a person answers in its terminal (Cursor has no command allowlist like Claude's) |
 | mod | A run counts as pruned only when more than 90 days past its end with no `inbox.jsonl`; Delete is pre-blocked only for running or paused runs (open PRs are left to the controller's refusal); `agent.event_accepted` rows are hidden in the event list; the list shows the newest 300 matching events; `run.cancel` also gets a confirm step |
 | mod | The mod's `Input` is single-line (the pinned `gpui-kit.d.ts` has no multi-line state), so profile instructions and arguments are written on one line with `\n` for a line break and `\\` for a backslash |
-| mod | A saved profile's role and id are fixed; harness choices are `claude-code` and `codex` (any other saved value still shows) |
+| mod | A saved profile's role and id are fixed; harness choices are `claude-code` and `cursor` (any other saved value still shows) |
 | acceptance test | The token scope check is asserted at `run.start`, where Phase 6 runs it, not at board creation |
 
 ## Deviations from the docs
@@ -45,7 +45,7 @@
 
 ## Known gaps
 
-- **Never run against anything real.** Real Herdr, Claude Code, Codex, Jira and Bitbucket haven't been touched. The manual checklist is the check, and it has to be done before the MVP is called done.
+- **Never run against anything real.** Real Herdr, Claude Code, Cursor, Jira and Bitbucket haven't been touched. The manual checklist is the check, and it has to be done before the MVP is called done.
 - **Not drawn or clicked in real Herdr:** everything new in `mod/src/main.ts` is only typechecked: the Activity layout, run cards, filters, event rows, the profile editor inputs, pills and toggles, the Yes/No confirms, the scroll areas, and the loading of `~/.collie` files. Mod unit tests cover the pure rules and that every new button sends a command the schema accepts.
 - **Cursor has never been launched.** Its adapter follows Cursor's CLI reference (`agent [prompt]`, `--model`), but the placeholder model name, the prompt-in-first-message approach and how `hc` reads a Cursor turn ending are unchecked; check them with the manual checklist. Without `--force` it will stop at every command waiting for someone to answer in its terminal.
 - The event list in the Activity view doesn't scroll to the newest rows (no scroll-to-bottom API in `docs/herdr/`), and the Profiles tab needs a board to exist.
